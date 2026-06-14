@@ -342,6 +342,18 @@ function main() {
       doKill(t, atk, vic, false);
     }
 
+    // suppressive fire: tracers that miss, so "where bullets went" is visible
+    const supp = 2 + Math.floor(rand() * 4);
+    for (let s = 0; s < supp; s++) {
+      const shooters = players.filter((p) => p.alive && !p.wounded && !p.vehicle);
+      const atk = shooters[Math.floor(rand() * shooters.length)];
+      if (!atk) continue;
+      const targets = aliveEnemiesNear(atk, 50000).filter((q) => hasLOS(atk.pos, q.pos));
+      if (!targets.length) continue;
+      const tgt = targets[Math.floor(rand() * targets.length)];
+      emitMiss(t + Math.floor(rand() * TICK_MS), atk, tgt);
+    }
+
     // medic revives ~half of recent wounds
     for (const w of woundList.splice(0)) {
       if (t - w.at > 25000) continue;
@@ -431,6 +443,14 @@ function main() {
     p.alive = false;
     p.wounded = false;
     p.respawnAt = t + 20000 + Math.floor(rand() * 15000);
+  }
+
+  function emitMiss(t: number, atk: Sim, tgt: Sim) {
+    const ox = (rand() - 0.5) * 4500, oy = (rand() - 0.5) * 4500;
+    const to = { x: tgt.pos.x + ox, y: tgt.pos.y + oy };
+    const fromZ = terrainZ(atk.pos.x, atk.pos.y) + STAND + 60;
+    const toZ = terrainZ(to.x, to.y) + STAND;
+    emit(t, `LogSquadStats: Projectile: shooter=${atk.eos} weapon=${atk.weapon} from=${atk.pos.x.toFixed(1)},${atk.pos.y.toFixed(1)},${fromZ.toFixed(1)} to=${to.x.toFixed(1)},${to.y.toFixed(1)},${toZ.toFixed(1)} speed=850 hit=0 victim=-`);
   }
 
   function doKill(t: number, atk: Sim, vic: Sim, suspicious: boolean) {

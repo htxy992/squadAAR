@@ -51,7 +51,14 @@ Other scripts:
 - **Players** coloured by team, with view-direction, wounded state, names (toggle).
 - **Vehicles** with hull HP ring, turret facing, per-component status and Elo pool.
 - **Flags** with capture radius + progress; **FOBs**; live **tickets** & clock.
-- **Projectile tracers** coloured green (plausible) / red (suspicious).
+- **Animated bullets** that travel along their trajectory with muzzle flashes,
+  tracer streaks and **impact markers** showing exactly *where someone got hit*
+  (hit) vs *where the round landed* (miss). Toggle animation, impacts and
+  full **sightlines** independently; suspicious shots draw red.
+- **1v1 engagement / "why you died"** — click any player (or a kill in the feed)
+  to replay the engagement: the killer→victim sightline + distance, the killing
+  weapon, headshot flag, killing-shot plausibility, and the full *damage-taken-
+  this-life* breakdown (every attacker who damaged you, ranked).
 - Click any player/vehicle to inspect live + round stats; jump from the event feed.
 
 ### SquadPoints (chapter 3 of the spec)

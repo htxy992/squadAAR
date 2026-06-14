@@ -43,6 +43,7 @@ export async function ingestLogFile(file: string, store: Store, eloState: EloSta
       snapshots: round.snapshots,
       mapEvents: round.mapEvents,
       analysis: round.analysis,
+      deaths: round.deaths,
       report,
       eloReport,
       balance

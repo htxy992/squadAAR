@@ -167,12 +167,44 @@ export interface RoundAnalysis {
   playerSuspicion: PlayerSuspicion[];
 }
 
+export interface DamageContribution {
+  eosID: string;
+  name: string;
+  damage: number;
+}
+
+/** A reconstructed death: who killed whom, how, and the full damage sequence. */
+export interface DeathReport {
+  tMs: number;
+  victimEOSID?: string;
+  victimName: string;
+  victimTeam?: number;
+  victimPos?: NormPos;
+  killerEOSID?: string;
+  killerName?: string;
+  killerTeam?: number;
+  killerPos?: NormPos;
+  weapon?: string;
+  distanceM?: number;
+  headshot: boolean;
+  teamkill: boolean;
+  cause: 'killed' | 'bled out' | 'gave up' | 'team-killed';
+  /** all attackers who damaged the victim this life, by damage dealt */
+  contributors: DamageContribution[];
+  /** plausibility of the killing shot, if a projectile matched */
+  plausibility?: { score: number; flags: string[] };
+  /** killing-shot endpoints for drawing the engagement */
+  from?: NormPos;
+  to?: NormPos;
+}
+
 export interface Round {
   meta: RoundMeta;
   players: Record<string, RoundPlayer>;
   snapshots: Snapshot[];
   mapEvents: MapEvent[];
   analysis: RoundAnalysis;
+  deaths: DeathReport[];
   /** the raw normalized events, kept for the points engine + drill-down */
   events: TimelineEvent[];
 }

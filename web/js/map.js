@@ -10,10 +10,11 @@ export class MapRenderer {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.bundle = null;
-    this.opts = { tracers: true, suspiciousOnly: false, names: false };
+    this.opts = { tracers: true, animate: true, sightlines: false, impacts: true, suspiciousOnly: false, names: false };
     this.selected = null; // { kind:'player'|'vehicle', id }
     this.follow = false;
     this.highlightProj = null;
+    this.highlightEngagement = null; // a DeathReport
     this._dpr = 1;
     this._size = 0;
     this._resize();
@@ -101,6 +102,7 @@ export class MapRenderer {
     this._drawEventMarkers(timeMs);
     for (const v of vehicles) this._drawVehicle(v);
     for (const p of players) this._drawPlayer(p);
+    if (this.highlightEngagement) this._drawEngagement(this.highlightEngagement);
     this._lastPlayers = players;
     this._lastVehicles = vehicles;
 
@@ -215,28 +217,134 @@ export class MapRenderer {
     }
   }
 
+  _travelMs(pr) {
+    if (pr._travel != null) return pr._travel;
+    const speed = pr.speed > 0 ? pr.speed : pr.weaponFamily === 'at' ? 300 : pr.weaponFamily === 'tank' ? 1200 : pr.weaponFamily === 'grenade' ? 80 : 800;
+    pr._travel = Math.max(40, (pr.rangeM / speed) * 1000);
+    return pr._travel;
+  }
+
   _drawProjectiles(timeMs) {
     const ctx = this.ctx;
-    const win = 4000;
+    const linger = 2600; // how long a tracer/impact stays after the bullet lands
+    const sel = this.selected && this.selected.kind === 'player' ? this.selected.id : null;
     for (const pr of this.bundle.analysis.projectiles) {
-      const age = timeMs - pr.tMs;
-      if (age < 0 || age > win) continue;
-      if (this.opts.suspiciousOnly && pr.plausibility.score >= this.bundle.analysis.threshold) continue;
-      const alpha = 1 - age / win;
       const susp = pr.plausibility.score < this.bundle.analysis.threshold;
-      ctx.beginPath();
-      ctx.moveTo(this.px(pr.from), this.py(pr.from));
-      ctx.lineTo(this.px(pr.to), this.py(pr.to));
-      ctx.strokeStyle = hexA(susp ? '#f87171' : '#fcd34d', alpha * (susp ? 0.95 : 0.55));
-      ctx.lineWidth = susp ? 2.2 : 1;
-      ctx.stroke();
+      if (this.opts.suspiciousOnly && !susp) continue;
+      const travel = this._travelMs(pr);
+      const tEnd = pr.tMs + travel;
+      const involved = sel && (pr.shooterEOSID === sel || pr.victimEOSID === sel);
+      if (timeMs < pr.tMs || timeMs > tEnd + linger) continue;
+
+      const fx = this.px(pr.from), fy = this.py(pr.from);
+      const tx = this.px(pr.to), ty = this.py(pr.to);
+      const baseCol = susp ? '#ff5d5d' : involved ? '#7dd3fc' : '#fcd34d';
+
+      // optional full sightline (faint), so you can see the shooter->victim line
+      if (this.opts.sightlines || involved) {
+        ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(tx, ty);
+        ctx.strokeStyle = hexA(baseCol, involved ? 0.35 : 0.18); ctx.lineWidth = 1; ctx.stroke();
+      }
+
+      if (timeMs <= tEnd) {
+        // --- bullet in flight ---
+        const prog = this.opts.animate ? (timeMs - pr.tMs) / travel : 1;
+        const head = { x: fx + (tx - fx) * prog, y: fy + (ty - fy) * prog };
+        const tailP = Math.max(0, prog - 0.32);
+        const tail = { x: fx + (tx - fx) * tailP, y: fy + (ty - fy) * tailP };
+        // tracer streak
+        const grad = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
+        grad.addColorStop(0, hexA(baseCol, 0));
+        grad.addColorStop(1, hexA(baseCol, susp ? 1 : 0.9));
+        ctx.beginPath(); ctx.moveTo(tail.x, tail.y); ctx.lineTo(head.x, head.y);
+        ctx.strokeStyle = grad; ctx.lineWidth = susp ? 2.4 : 1.6; ctx.stroke();
+        // bullet head
+        ctx.beginPath(); ctx.arc(head.x, head.y, susp ? 2.6 : 2, 0, Math.PI * 2);
+        ctx.fillStyle = '#fffbe6'; ctx.fill();
+        // muzzle flash
+        if (timeMs - pr.tMs < 110) {
+          ctx.beginPath(); ctx.arc(fx, fy, 4, 0, Math.PI * 2);
+          ctx.fillStyle = hexA('#ffe08a', 0.9 * (1 - (timeMs - pr.tMs) / 110)); ctx.fill();
+        }
+      } else if (this.opts.impacts) {
+        // --- impact / where it landed ---
+        const age = timeMs - tEnd;
+        const a = 1 - age / linger;
+        // faint spent tracer so you still see where the bullet went
+        ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(tx, ty);
+        ctx.strokeStyle = hexA(baseCol, 0.12 * a); ctx.lineWidth = 1; ctx.stroke();
+        if (pr.hit && pr.victimEOSID) this._hitBurst(tx, ty, a, susp, age);
+        else this._missPuff(tx, ty, a);
+      }
     }
+
     if (this.highlightProj) {
       const pr = this.highlightProj;
       ctx.beginPath(); ctx.moveTo(this.px(pr.from), this.py(pr.from)); ctx.lineTo(this.px(pr.to), this.py(pr.to));
       ctx.strokeStyle = '#ff3b3b'; ctx.lineWidth = 3; ctx.setLineDash([6, 4]); ctx.stroke(); ctx.setLineDash([]);
       for (const pt of [pr.from, pr.to]) { ctx.beginPath(); ctx.arc(this.px(pt), this.py(pt), 4, 0, Math.PI * 2); ctx.fillStyle = '#ff3b3b'; ctx.fill(); }
     }
+  }
+
+  _drawEngagement(d) {
+    const ctx = this.ctx;
+    const from = d.from || d.killerPos, to = d.to || d.victimPos;
+    if (from && to) {
+      const fx = this.px(from), fy = this.py(from), tx = this.px(to), ty = this.py(to);
+      // killing-shot sightline
+      ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(tx, ty);
+      ctx.strokeStyle = d.plausibility && d.plausibility.score < 0.5 ? '#ff5d5d' : '#fbbf24';
+      ctx.lineWidth = 2.5; ctx.setLineDash([7, 5]); ctx.stroke(); ctx.setLineDash([]);
+      // distance label at midpoint
+      if (d.distanceM != null) {
+        ctx.fillStyle = '#0b0f14'; const mx = (fx + tx) / 2, my = (fy + ty) / 2;
+        const txt = `${d.distanceM} m`;
+        ctx.font = 'bold 11px ui-sans-serif'; const w = ctx.measureText(txt).width;
+        ctx.fillStyle = 'rgba(7,11,16,.8)'; ctx.fillRect(mx - w / 2 - 4, my - 8, w + 8, 15);
+        ctx.fillStyle = '#fde68a'; ctx.fillText(txt, mx - w / 2, my + 3);
+      }
+    }
+    // killer marker
+    if (d.killerPos) this._tagMarker(d.killerPos, d.killerName || 'killer', this.color(d.killerTeam), '➤');
+    // victim marker
+    if (d.victimPos) this._tagMarker(d.victimPos, d.victimName || 'victim', '#ffffff', '✖');
+    // contributors (assist damage)
+    for (const ct of d.contributors || []) {
+      if (ct.eosID === d.killerEOSID) continue;
+      const p = (this._lastPlayers || []).find((q) => q.eosID === ct.eosID);
+      if (p) { const x = this.px(p.pos), y = this.py(p.pos); ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.strokeStyle = '#a78bfa'; ctx.lineWidth = 1.5; ctx.stroke(); }
+    }
+  }
+  color(t) { return t === 1 ? '#3b82f6' : t === 2 ? '#ef4444' : '#94a3b8'; }
+  _tagMarker(pos, label, color, glyph) {
+    const ctx = this.ctx, x = this.px(pos), y = this.py(pos);
+    ctx.beginPath(); ctx.arc(x, y, 9, 0, Math.PI * 2); ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = color; ctx.font = 'bold 11px ui-sans-serif'; ctx.fillText(glyph, x - 4, y + 4);
+    ctx.fillStyle = 'rgba(7,11,16,.8)';
+    const w = ctx.measureText(label).width;
+    ctx.fillRect(x + 10, y - 16, w + 8, 15);
+    ctx.fillStyle = color; ctx.fillText(label, x + 14, y - 5);
+  }
+
+  _hitBurst(x, y, a, susp, age) {
+    const ctx = this.ctx;
+    const col = susp ? '#ff5d5d' : '#fb7185';
+    const r = 3 + Math.min(8, age / 120); // expanding ring
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.strokeStyle = hexA(col, 0.8 * a); ctx.lineWidth = 2; ctx.stroke();
+    // spark cross
+    ctx.strokeStyle = hexA('#fff1f1', a); ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    for (let i = 0; i < 4; i++) {
+      const ang = (i * Math.PI) / 2 + Math.PI / 4;
+      ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(ang) * 5, y + Math.sin(ang) * 5);
+    }
+    ctx.stroke();
+  }
+  _missPuff(x, y, a) {
+    const ctx = this.ctx;
+    ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = hexA('#9aa7b4', 0.5 * a); ctx.fill();
   }
 
   _drawEventMarkers(timeMs) {

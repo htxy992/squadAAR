@@ -60,11 +60,15 @@ plausibility from a terrain-height field (sightline / line-of-sight occlusion),
 weapon range and firing angle, surfacing wallbangs and impossible shots for the
 Auto-Mod / cheater-detection workflow.</li>
 </ul>
-<h3>Map replay</h3>
+<h3>Map replay & engagements</h3>
 <p>Scrub or play the round back. Players show team, view direction, wounded
 state; vehicles show hull HP, turret facing, component status and pool; flags
-show capture progress; tracers are coloured green (plausible) or red
-(suspicious). Click any entity to inspect it.</p>
+show capture progress. <b>Bullets are animated</b> along their trajectory with
+muzzle flashes, tracer streaks and impact markers (hit vs miss); suspicious
+shots draw red. Click a player — or any kill in the feed — to open the
+<b>1v1 engagement / "why you died"</b> view: the killer→victim sightline and
+distance, weapon, headshot, killing-shot plausibility and the full
+damage-taken-this-life breakdown.</p>
 <p class="muted">The provided logs were client-side and lack combat/position
 events, so the bundled sample is a synthetic <i>server</i> log in the exact same
 format — swap in real server logs with <code>npm run ingest</code>.</p>

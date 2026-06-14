@@ -30,7 +30,10 @@ export async function renderAAR(view, roundId) {
 
   const mk = (id, label, checked) => el('label', {}, [el('input', { type: 'checkbox', id, ...(checked ? { checked: 'checked' } : {}) }), ' ' + label]);
   const toggles = el('div', { class: 'toggles' }, [
-    mk('tg-tracers', 'Tracers / projectiles', true),
+    mk('tg-tracers', 'Shots / tracers', true),
+    mk('tg-animate', 'Animate bullets', true),
+    mk('tg-impacts', 'Impacts (hit/miss)', true),
+    mk('tg-sightlines', 'Sightlines', false),
     mk('tg-susp', 'Suspicious only', false),
     mk('tg-names', 'Player names', false),
     mk('tg-follow', 'Follow selected', false)
@@ -44,6 +47,7 @@ export async function renderAAR(view, roundId) {
 
   const infoPanel = el('div', { class: 'panel' });
   const selPanel = el('div', { class: 'panel' }, [el('h3', { text: 'Selected' }), el('div', { class: 'sel-body sel-empty', text: 'Click a player or vehicle on the map.' })]);
+  const engagePanel = el('div', { class: 'panel hidden' });
   const analysisPanel = el('div', { class: 'panel' });
   const feedPanel = el('div', { class: 'panel' }, [el('h3', { text: 'Event feed' }), el('div', { class: 'feed' })]);
 
@@ -51,7 +55,7 @@ export async function renderAAR(view, roundId) {
     el('span', { class: 'back', text: '← Back to rounds', onclick: () => (location.hash = '#/rounds') }),
     mapWrap, controls, toggles, legend, scoreboard
   ]);
-  const right = el('div', { class: 'right' }, [infoPanel, selPanel, analysisPanel, feedPanel]);
+  const right = el('div', { class: 'right' }, [infoPanel, selPanel, engagePanel, analysisPanel, feedPanel]);
   view.append(el('div', { class: 'aar' }, [left, right]));
 
   // ---- renderer ----------------------------------------------------------
@@ -63,7 +67,11 @@ export async function renderAAR(view, roundId) {
   renderInfo(infoPanel, bundle);
   renderAnalysis(analysisPanel, bundle, jumpToProjectile);
   renderScoreboard(scoreboard.querySelector('.scoreboard'), bundle);
-  buildFeed(feedPanel.querySelector('.feed'), bundle, (tms) => { setTime(tms); pause(); });
+  buildFeed(feedPanel.querySelector('.feed'), bundle, (ev) => {
+    const d = (bundle.deaths || []).find((x) => Math.abs(x.tMs - ev.tMs) < 50 && x.victimEOSID === ev.victimEOSID);
+    if (d) jumpToDeath(d);
+    else { setTime(ev.tMs); pause(); }
+  });
 
   // ---- playback ----------------------------------------------------------
   let currentMs = 0;
@@ -83,6 +91,9 @@ export async function renderAAR(view, roundId) {
   scrub.oninput = () => { setTime(+scrub.value); pause(); };
   speedSel.onchange = () => (speed = +speedSel.value);
   toggles.querySelector('#tg-tracers').onchange = (e) => (r.opts.tracers = e.target.checked);
+  toggles.querySelector('#tg-animate').onchange = (e) => (r.opts.animate = e.target.checked);
+  toggles.querySelector('#tg-impacts').onchange = (e) => (r.opts.impacts = e.target.checked);
+  toggles.querySelector('#tg-sightlines').onchange = (e) => (r.opts.sightlines = e.target.checked);
   toggles.querySelector('#tg-susp').onchange = (e) => (r.opts.suspiciousOnly = e.target.checked);
   toggles.querySelector('#tg-names').onchange = (e) => (r.opts.names = e.target.checked);
   toggles.querySelector('#tg-follow').onchange = (e) => (r.follow = e.target.checked);
@@ -93,8 +104,20 @@ export async function renderAAR(view, roundId) {
     const cy = ((ev.clientY - rect.top) / rect.height) * r._size;
     const hit = r.pick(cx, cy);
     r.selected = hit ? { kind: hit.kind, id: hit.id } : null;
+    r.highlightEngagement = null;
+    engagePanel.classList.add('hidden');
     updateSelected();
   });
+
+  function jumpToDeath(d) {
+    setTime(d.tMs);
+    pause();
+    r.highlightProj = null;
+    r.highlightEngagement = d;
+    if (d.victimEOSID) r.selected = { kind: 'player', id: d.victimEOSID };
+    renderEngagement(engagePanel, d, jumpToDeath);
+    updateSelected();
+  }
 
   function jumpToProjectile(pr) {
     setTime(pr.tMs);
@@ -120,7 +143,8 @@ export async function renderAAR(view, roundId) {
       const elo = bundle.eloReport.players.find((p) => p.eosID === r.selected.id);
       if (!rep && !live) { body.textContent = '—'; return; }
       const s = rep?.stats;
-      clear(body).append(
+      clear(body);
+      [
         el('div', { html: `<b style="color:${teamColor(rep?.team ?? live?.team, true)}">${rep?.name ?? live?.name}</b> <span class="muted">T${rep?.team ?? live?.team} · ${rep?.pool ?? live?.role ?? ''}</span>` }),
         live ? el('div', { class: 'muted', text: `state ${live.state} · hp ${Math.round(live.health)} · squad ${live.squad ?? '-'}` }) : null,
         rep ? el('div', { class: 'statline', html:
@@ -133,7 +157,12 @@ export async function renderAAR(view, roundId) {
           `<span>Global Elo Δ</span><span class="num ${(elo?.globalDelta ?? 0) >= 0 ? 'pos' : 'neg'}">${elo ? signed(elo.globalDelta) : '-'}</span>`
         }) : null,
         rep ? el('a', { href: `#/player/${rep.eosID}`, text: 'open full player profile →' }) : null
-      );
+      ].filter(Boolean).forEach((n) => body.append(n));
+      const id = r.selected.id;
+      const myDeaths = (bundle.deaths || []).filter((d) => d.victimEOSID === id);
+      const myKills = (bundle.deaths || []).filter((d) => d.killerEOSID === id && !d.teamkill);
+      if (myDeaths.length) body.append(deathList(`Why they died (${myDeaths.length}) — click to replay`, myDeaths, 'victim', jumpToDeath));
+      if (myKills.length) body.append(deathList(`Kills (${myKills.length})`, myKills, 'killer', jumpToDeath));
     } else {
       const live = (r._lastVehicles || []).find((v) => v.id === r.selected.id);
       if (!live) { body.textContent = '—'; return; }
@@ -231,7 +260,7 @@ function renderScoreboard(node, bundle) {
 function buildFeed(node, bundle, onJump) {
   clear(node);
   for (const ev of bundle.mapEvents) {
-    const row = el('div', { class: 'ev', 'data-tms': ev.tMs, onclick: () => onJump(ev.tMs) }, [
+    const row = el('div', { class: 'ev', 'data-tms': ev.tMs, onclick: () => onJump(ev) }, [
       el('span', { class: `dot k-${ev.kind}` }),
       el('span', { class: 'tm', text: fmtClock(ev.tMs) }),
       el('span', { text: ev.label })
@@ -254,6 +283,50 @@ function highlightFeed(node, currentMs) {
   if (lastVisible !== _lastFeedIdx && lastVisible >= 0) {
     _lastFeedIdx = lastVisible;
     rows[lastVisible].scrollIntoView({ block: 'nearest' });
+  }
+}
+
+function deathList(title, deaths, mode, onJump) {
+  const wrap = el('div', { class: 'feed', style: 'max-height:150px;margin-top:6px' }, [el('div', { class: 'muted', style: 'margin-bottom:2px', text: title })]);
+  for (const d of deaths.slice().sort((a, b) => a.tMs - b.tMs)) {
+    const other = mode === 'victim' ? d.killerName || '—' : d.victimName || '—';
+    const verb = mode === 'victim' ? (d.cause === 'killed' || d.cause === 'bled out' || d.cause === 'team-killed' ? 'by' : '·') : '→';
+    const tag = [d.weapon, d.distanceM != null ? d.distanceM + ' m' : null, d.headshot ? 'HS' : null].filter(Boolean).join(' · ');
+    const susp = d.plausibility && d.plausibility.score < 0.5;
+    wrap.append(el('div', { class: 'ev', onclick: () => onJump(d) }, [
+      el('span', { class: 'tm', text: fmtClock(d.tMs) }),
+      el('span', { html: `${verb} <b>${other}</b> <span class="muted">${tag}</span>${susp ? ' <span style="color:#f87171">⚠</span>' : ''}` })
+    ]));
+  }
+  return wrap;
+}
+
+function renderEngagement(panel, d, onJump) {
+  panel.classList.remove('hidden');
+  clear(panel);
+  const causeTxt = { killed: 'Killed', 'bled out': 'Bled out (not revived)', 'gave up': 'Gave up', 'team-killed': 'Team-killed' }[d.cause] || d.cause;
+  panel.append(
+    el('h3', { text: `Engagement — why ${d.victimName} died` }),
+    el('div', { html: `<b style="color:${teamColor(d.victimTeam, true)}">${d.victimName}</b> ${causeTxt}` + (d.killerName ? ` by <b style="color:${teamColor(d.killerTeam, true)}">${d.killerName}</b>` : '') }),
+    el('div', { class: 'statline', html:
+      `<span>Weapon</span><span>${d.weapon || '—'}</span>` +
+      `<span>Distance</span><span class="num">${d.distanceM != null ? d.distanceM + ' m' : '—'}</span>` +
+      `<span>Headshot</span><span>${d.headshot ? 'yes' : 'no'}</span>` +
+      `<span>Time</span><span class="num">${fmtClock(d.tMs)}</span>` })
+  );
+  if (d.plausibility) {
+    const s = d.plausibility.score;
+    panel.append(el('div', { html: `<span class="muted">Killing-shot plausibility</span> <b style="color:${s < 0.5 ? '#f87171' : '#34d399'}">${s.toFixed(2)}</b>` }));
+    if (d.plausibility.flags.length) panel.append(el('div', { style: 'color:#fbbf24;font-size:12px', text: d.plausibility.flags.join(' · ') }));
+  }
+  if (d.contributors && d.contributors.length) {
+    panel.append(el('div', { class: 'muted', style: 'margin-top:8px', text: 'Damage taken this life' }));
+    const max = Math.max(...d.contributors.map((c) => c.damage), 1);
+    for (const c of d.contributors) {
+      const pct = Math.round((c.damage / max) * 100);
+      panel.append(el('div', { class: 'kv', html: `<span>${c.name}${c.eosID === d.killerEOSID ? ' <span class="muted">(killer)</span>' : ''}</span><span class="num">${c.damage}</span>` }));
+      panel.append(el('div', { style: 'height:4px;background:#1f2c39;border-radius:3px;overflow:hidden;margin:0 0 5px', html: `<div style="height:100%;width:${pct}%;background:${c.eosID === d.killerEOSID ? '#f87171' : '#a78bfa'}"></div>` }));
+    }
   }
 }
 

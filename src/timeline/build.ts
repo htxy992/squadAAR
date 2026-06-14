@@ -3,7 +3,7 @@ import { resolveMap, worldToNorm, type MapInfo } from '../maps/mapRegistry.js';
 import { infantryPoolForRole, type Pool } from '../elo/pools.js';
 import { classifyVehicleType } from '../elo/vehicleTypes.js';
 import { buildTerrainField, analyzeProjectile, classifyWeapon, type TerrainField } from '../analysis/ballistics.js';
-import type { ProjectileTrack, PlayerSuspicion, RoundAnalysis } from './types.js';
+import type { ProjectileTrack, PlayerSuspicion, RoundAnalysis, DeathReport, DamageContribution } from './types.js';
 import type {
   Round,
   RoundMeta,
@@ -366,6 +366,9 @@ export function buildRound(events: TimelineEvent[], opts: BuildOptions = {}): Ro
     bounds: map.world
   });
 
+  // ---- deaths / 1v1 engagements ("why you died") --------------------
+  const deaths = buildDeaths({ events, startTime, pTracks, nameToEos, eosToName, teamOf, np, rel, projectiles: analysis.projectiles });
+
   // ---- final tickets / faction inference ----------------------------
   const finalTickets: Record<number, number> = {};
   for (const [team, arr] of tickets) finalTickets[team] = arr[arr.length - 1]?.tickets ?? 0;
@@ -389,7 +392,103 @@ export function buildRound(events: TimelineEvent[], opts: BuildOptions = {}): Ro
     source: opts.source
   };
 
-  return { meta, players, snapshots, mapEvents, analysis, events };
+  return { meta, players, snapshots, mapEvents, analysis, deaths, events };
+}
+
+/* ----------------------------- death reports ----------------------------- */
+
+interface DeathCtx {
+  events: TimelineEvent[];
+  startTime: number;
+  pTracks: Map<string, PSample[]>;
+  nameToEos: Map<string, string>;
+  eosToName: Map<string, string>;
+  teamOf: Map<string, number>;
+  np: (p: Vec3) => NormPos;
+  rel: (t: number) => number;
+  projectiles: ProjectileTrack[];
+}
+
+const DMG_WINDOW_MS = 3 * 60 * 1000;
+
+function buildDeaths(c: DeathCtx): DeathReport[] {
+  const out: DeathReport[] = [];
+  const buf = new Map<string, Array<{ eos: string; dmg: number; t: number; weapon?: string }>>();
+  const posAt = (eos: string | undefined, t: number): Vec3 | undefined => {
+    if (!eos) return undefined;
+    return sampleAt(c.pTracks.get(eos) ?? [], t)?.pos;
+  };
+
+  for (const e of c.events) {
+    if (e.type === 'PLAYER_DAMAGED') {
+      const v = c.nameToEos.get(e.victimName);
+      if (!v || !e.attackerEOSID) continue;
+      const arr = buf.get(v) ?? [];
+      arr.push({ eos: e.attackerEOSID, dmg: e.damage, t: e.time, weapon: e.weapon });
+      buf.set(v, arr);
+    } else if (e.type === 'PLAYER_REVIVED') {
+      if (e.victimEOSID) buf.delete(e.victimEOSID);
+    } else if (e.type === 'PLAYER_DIED') {
+      const victimEos = c.nameToEos.get(e.victimName);
+      const tRel = c.rel(e.time);
+      const contribsRaw = (buf.get(victimEos ?? '') ?? []).filter((x) => e.time - x.t <= DMG_WINDOW_MS);
+      const byAtk = new Map<string, number>();
+      for (const x of contribsRaw) byAtk.set(x.eos, (byAtk.get(x.eos) ?? 0) + x.dmg);
+      const contributors: DamageContribution[] = [...byAtk.entries()]
+        .map(([eos, damage]) => ({ eosID: eos, name: c.eosToName.get(eos) ?? eos.slice(0, 8), damage: Math.round(damage) }))
+        .sort((a, b) => b.damage - a.damage);
+
+      // effective killer: explicit attacker on the Die line, else top contributor
+      let killerEos = e.attackerEOSID && e.attackerEOSID !== victimEos ? e.attackerEOSID : contributors[0]?.eosID;
+      const vTeam = victimEos ? c.teamOf.get(victimEos) : undefined;
+      const kTeam = killerEos ? c.teamOf.get(killerEos) : undefined;
+      const teamkill = vTeam != null && kTeam != null && vTeam === kTeam && killerEos !== victimEos;
+
+      let cause: DeathReport['cause'] = 'killed';
+      if (!killerEos || killerEos === victimEos) cause = 'gave up';
+      else if (!e.attackerEOSID || e.attackerEOSID === victimEos) cause = 'bled out';
+      else if (teamkill) cause = 'team-killed';
+
+      const vPos = posAt(victimEos, e.time);
+      const kPos = posAt(killerEos, e.time);
+      const distanceM = vPos && kPos ? Math.round(Math.hypot(vPos.x - kPos.x, vPos.y - kPos.y) / 100) : undefined;
+      const weapon = cleanWeapon(e.weapon) ?? cleanWeapon(contribsRaw[contribsRaw.length - 1]?.weapon);
+      const headshot = isBulletWeapon(weapon) && e.damage >= 95;
+
+      // match a projectile for plausibility + draw endpoints
+      const proj = c.projectiles.find(
+        (p) => p.victimEOSID === victimEos && p.shooterEOSID === killerEos && Math.abs(p.tMs - tRel) < 2500
+      );
+
+      out.push({
+        tMs: tRel,
+        victimEOSID: victimEos,
+        victimName: e.victimName,
+        victimTeam: vTeam,
+        victimPos: vPos ? c.np(vPos) : undefined,
+        killerEOSID: killerEos,
+        killerName: killerEos ? c.eosToName.get(killerEos) : undefined,
+        killerTeam: kTeam,
+        killerPos: kPos ? c.np(kPos) : undefined,
+        weapon,
+        distanceM,
+        headshot,
+        teamkill,
+        cause,
+        contributors,
+        plausibility: proj ? { score: proj.plausibility.score, flags: proj.plausibility.flags } : undefined,
+        from: proj ? proj.from : kPos ? c.np(kPos) : undefined,
+        to: proj ? proj.to : vPos ? c.np(vPos) : undefined
+      });
+      if (victimEos) buf.delete(victimEos);
+    }
+  }
+  return out;
+}
+
+function isBulletWeapon(weapon?: string): boolean {
+  const w = (weapon ?? '').toLowerCase();
+  return /ak|m4|m16|rifle|sniper|svd|carbine|pistol|mg|pkp|pkm|m240|m110|m249/.test(w);
 }
 
 /* --------------------------- projectile analysis --------------------------- */
