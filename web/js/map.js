@@ -10,8 +10,9 @@ export class MapRenderer {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.bundle = null;
-    this.opts = { basemap: true, terrain: true, contours: false, elevation: false, tracers: true, animate: true, sightlines: false, impacts: true, suspiciousOnly: false, names: false };
+    this.opts = { basemap: true, terrain: true, contours: false, elevation: false, vehRoutes: false, vehHeat: false, tracers: true, animate: true, sightlines: false, impacts: true, suspiciousOnly: false, names: false };
     this._minimap = null;
+    this.routeVehicleId = null;
     this.selected = null; // { kind:'player'|'vehicle', id }
     this.follow = false;
     this.highlightProj = null;
@@ -27,8 +28,52 @@ export class MapRenderer {
     this.snaps = bundle.snapshots;
     this.step = this.snaps.length > 1 ? this.snaps[1].tMs - this.snaps[0].tMs : 1000;
     this._prepTerrain();
+    this._prepVehicleHeat();
     this._loadMinimap();
     this._resize();
+  }
+
+  _prepVehicleHeat() {
+    this._vehHeatCanvas = null;
+    const vts = this.bundle?.vehicleTracks || [];
+    if (!vts.length) return;
+    const G = 110;
+    const acc = new Float64Array(G * G);
+    for (const vt of vts) {
+      for (let i = 1; i < vt.path.length; i++) {
+        const a = vt.path[i - 1], b = vt.path[i];
+        if (Math.hypot(b.nx - a.nx, b.ny - a.ny) > 0.3) continue; // skip teleports
+        const steps = 6;
+        for (let s = 0; s <= steps; s++) {
+          const x = a.nx + (b.nx - a.nx) * (s / steps);
+          const y = a.ny + (b.ny - a.ny) * (s / steps);
+          const gx = Math.min(G - 1, Math.max(0, Math.floor(x * G)));
+          const gy = Math.min(G - 1, Math.max(0, Math.floor(y * G)));
+          acc[gy * G + gx] += 1;
+        }
+      }
+    }
+    // light blur
+    const blur = new Float64Array(G * G);
+    for (let y = 0; y < G; y++) for (let x = 0; x < G; x++) {
+      let s = 0, n = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const nx = x + dx, ny = y + dy;
+        if (nx >= 0 && nx < G && ny >= 0 && ny < G) { s += acc[ny * G + nx]; n++; }
+      }
+      blur[y * G + x] = s / n;
+    }
+    let max = 0; for (const v of blur) max = Math.max(max, v);
+    if (max <= 0) return;
+    const img = new ImageData(G, G);
+    for (let i = 0; i < blur.length; i++) {
+      const t = Math.min(1, blur[i] / max);
+      if (t < 0.02) { img.data[i * 4 + 3] = 0; continue; }
+      const [r, g, b] = ramp(t);
+      img.data[i * 4] = r; img.data[i * 4 + 1] = g; img.data[i * 4 + 2] = b;
+      img.data[i * 4 + 3] = Math.min(200, 40 + t * 200);
+    }
+    this._vehHeatCanvas = imgToCanvas(img);
   }
 
   _loadMinimap() {
@@ -169,8 +214,10 @@ export class MapRenderer {
     const vehicles = this._interpVehicles(s);
     const snap = s.a;
 
+    if (this.opts.vehHeat && this._vehHeatCanvas) { ctx.globalAlpha = 0.7; ctx.drawImage(this._vehHeatCanvas, 0, 0, S, S); ctx.globalAlpha = 1; }
     this._drawFlags(snap.flags);
     this._drawFobs(snap.fobs);
+    if (this.opts.vehRoutes || this.routeVehicleId) this._drawVehicleRoutes();
     if (this.opts.tracers) this._drawProjectiles(timeMs);
     this._drawEventMarkers(timeMs);
     for (const v of vehicles) this._drawVehicle(v);
@@ -406,6 +453,48 @@ export class MapRenderer {
     const w = ctx.measureText(label).width;
     ctx.fillRect(x + 10, y - 16, w + 8, 15);
     ctx.fillStyle = color; ctx.fillText(label, x + 14, y - 5);
+  }
+
+  _drawVehicleRoutes() {
+    const ctx = this.ctx, S = this._size;
+    const vts = this.bundle.vehicleTracks || [];
+    const drawPath = (vt, color, width, alpha) => {
+      ctx.strokeStyle = hexA(color, alpha); ctx.lineWidth = width;
+      ctx.beginPath();
+      let started = false;
+      for (let i = 0; i < vt.path.length; i++) {
+        const p = vt.path[i];
+        if (i > 0 && Math.hypot(p.nx - vt.path[i - 1].nx, p.ny - vt.path[i - 1].ny) > 0.3) { started = false; continue; }
+        const x = p.nx * S, y = p.ny * S;
+        if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    };
+    // faint: all routes (when overlay on); skip the highlighted one (drawn bright)
+    if (this.opts.vehRoutes) {
+      for (const vt of vts) {
+        if (vt.id === this.routeVehicleId) continue;
+        drawPath(vt, vt.team === 1 ? '#3b82f6' : '#ef4444', 1.2, 0.35);
+      }
+    }
+    const hi = vts.find((v) => v.id === this.routeVehicleId);
+    if (hi) {
+      drawPath(hi, hi.team === 1 ? '#93c5fd' : '#fca5a5', 2.4, 0.95);
+      // dwell markers sized by duration
+      for (const d of hi.dwell) {
+        const x = d.nx * S, y = d.ny * S;
+        const r = Math.min(16, 5 + d.durationMs / 30000);
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fillStyle = hexA('#f5b942', 0.22); ctx.fill();
+        ctx.strokeStyle = hexA('#f5b942', 0.85); ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.fillStyle = '#fde68a'; ctx.font = '9px ui-sans-serif';
+        ctx.fillText(`${Math.round(d.durationMs / 60000 * 10) / 10}m`, x + r + 2, y + 3);
+      }
+      // start / end markers
+      const a = hi.path[0], b = hi.path[hi.path.length - 1];
+      if (a) { ctx.fillStyle = '#34d399'; ctx.beginPath(); ctx.arc(a.nx * S, a.ny * S, 4, 0, Math.PI * 2); ctx.fill(); }
+      if (b) { ctx.fillStyle = hi.destroyedMs != null ? '#f87171' : '#e5edf5'; ctx.beginPath(); ctx.arc(b.nx * S, b.ny * S, 4, 0, Math.PI * 2); ctx.fill(); }
+    }
   }
 
   // indirect fire: lobbed arc + blast radius at impact

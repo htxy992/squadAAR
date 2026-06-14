@@ -3,7 +3,7 @@ import { resolveMap, worldToNorm, type MapInfo } from '../maps/mapRegistry.js';
 import { infantryPoolForRole, type Pool } from '../elo/pools.js';
 import { classifyVehicleType } from '../elo/vehicleTypes.js';
 import { buildTerrainField, terrainHeightAt, analyzeProjectile, classifyWeapon, type TerrainField } from '../analysis/ballistics.js';
-import type { ProjectileTrack, PlayerSuspicion, RoundAnalysis, DeathReport, DamageContribution, TerrainGrid } from './types.js';
+import type { ProjectileTrack, PlayerSuspicion, RoundAnalysis, DeathReport, DamageContribution, TerrainGrid, VehicleTrackSummary } from './types.js';
 import type {
   Round,
   RoundMeta,
@@ -384,6 +384,7 @@ export function buildRound(events: TimelineEvent[], opts: BuildOptions = {}): Ro
   const deaths = buildDeaths({ events, field, pTracks, nameToEos, eosToName, teamOf, np, rel, projectiles: analysis.projectiles });
 
   const terrain = serializeTerrain(field);
+  const vehicleTracks = computeVehicleTracks(vTracks, np, rel);
 
   // ---- final tickets / faction inference ----------------------------
   const finalTickets: Record<number, number> = {};
@@ -409,7 +410,77 @@ export function buildRound(events: TimelineEvent[], opts: BuildOptions = {}): Ro
     source: opts.source
   };
 
-  return { meta, players, snapshots, mapEvents, analysis, deaths, terrain, events };
+  return { meta, players, snapshots, mapEvents, analysis, deaths, terrain, vehicleTracks, events };
+}
+
+/* --------------------------- vehicle analytics --------------------------- */
+
+const DWELL_RADIUS_CM = 1800; // 18 m
+const DWELL_MIN_MS = 30_000;
+const MOVING_MPS = 2;
+const TELEPORT_MPS = 35; // ~126 km/h — above this a segment is a respawn/teleport
+
+function computeVehicleTracks(
+  vTracks: Map<string, { type: string; team: number; samples: VSample[]; comp: Map<string, { t: number; health: number }[]> }>,
+  np: (p: Vec3) => NormPos,
+  rel: (t: number) => number
+): VehicleTrackSummary[] {
+  const out: VehicleTrackSummary[] = [];
+  for (const [id, v] of vTracks) {
+    const s = v.samples;
+    if (s.length < 2) continue;
+    const path: VehicleTrackSummary['path'] = s.map((x) => {
+      const n = np(x.pos);
+      return { tMs: rel(x.t), nx: n.nx, ny: n.ny };
+    });
+    let dist = 0, maxSpeed = 0, standing = 0, active = 0;
+    for (let i = 1; i < s.length; i++) {
+      const dt = (s[i].t - s[i - 1].t) / 1000;
+      if (dt <= 0) continue;
+      const dM = Math.hypot(s[i].pos.x - s[i - 1].pos.x, s[i].pos.y - s[i - 1].pos.y) / 100;
+      const mps = dM / dt;
+      if (mps > TELEPORT_MPS) continue; // ignore respawn/teleport jumps
+      dist += dM;
+      maxSpeed = Math.max(maxSpeed, mps * 3.6);
+      if (mps < MOVING_MPS) standing += dt * 1000;
+      else active += dt * 1000;
+    }
+    // dwell clusters: greedy windows where the vehicle stays within DWELL_RADIUS
+    const dwell: VehicleTrackSummary['dwell'] = [];
+    let i = 0;
+    while (i < s.length) {
+      let j = i + 1;
+      while (j < s.length && Math.hypot(s[j].pos.x - s[i].pos.x, s[j].pos.y - s[i].pos.y) < DWELL_RADIUS_CM) j++;
+      const dur = s[j - 1].t - s[i].t;
+      if (dur >= DWELL_MIN_MS && j - i >= 2) {
+        let cx = 0, cy = 0;
+        for (let k = i; k < j; k++) { cx += s[k].pos.x; cy += s[k].pos.y; }
+        const n = np({ x: cx / (j - i), y: cy / (j - i), z: 0 });
+        dwell.push({ nx: n.nx, ny: n.ny, fromMs: rel(s[i].t), toMs: rel(s[j - 1].t), durationMs: dur });
+        i = j;
+      } else i++;
+    }
+    const destroyed = s.find((x) => x.health <= 0);
+    const activeS = active / 1000;
+    out.push({
+      id,
+      type: v.type,
+      pool: classifyVehicleType(v.type),
+      team: v.team,
+      path,
+      dwell,
+      distanceM: Math.round(dist),
+      maxSpeedKmh: Math.round(maxSpeed),
+      avgSpeedKmh: activeS > 0 ? Math.round((dist / activeS) * 3.6) : 0,
+      activeMs: Math.round(active),
+      standingMs: Math.round(standing),
+      firstSeenMs: rel(s[0].t),
+      lastSeenMs: rel(s[s.length - 1].t),
+      destroyedMs: destroyed ? rel(destroyed.t) : undefined
+    });
+  }
+  out.sort((a, b) => b.distanceM - a.distanceM);
+  return out;
 }
 
 function serializeTerrain(field: TerrainField): TerrainGrid {

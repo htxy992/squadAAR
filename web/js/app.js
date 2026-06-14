@@ -70,7 +70,9 @@ state; vehicles show hull HP, turret facing, component status and pool; flags
 show capture progress. <b>Bullets are animated</b> along their trajectory with
 muzzle flashes, tracer streaks and impact markers (hit vs miss); <b>mortar /
 indirect fire</b> arcs in and bursts with a blast-radius ring; suspicious shots
-draw red.</p>
+draw red. <b>Vehicle analysis</b> overlays routes, a movement heatmap and dwell
+markers (where vehicles stood), with a Vehicles panel grouped by class &amp; type
+— click one to trace its route.</p>
 <p>Click a player — or any kill in the feed — to open the
 <b>1v1 engagement / "why you died"</b> view: the killer→victim sightline and
 distance, weapon, headshot, <b>elevation / high-ground</b>, <b>line-of-sight

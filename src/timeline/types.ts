@@ -227,6 +227,39 @@ export interface TerrainGrid {
   coverage: number;
 }
 
+export interface VehiclePathPoint {
+  tMs: number;
+  nx: number;
+  ny: number;
+}
+
+/** A spot where a vehicle stood still long enough to be notable. */
+export interface VehicleDwell {
+  nx: number;
+  ny: number;
+  fromMs: number;
+  toMs: number;
+  durationMs: number;
+}
+
+/** Per-vehicle movement analysis: route, where it stood, distance & speed. */
+export interface VehicleTrackSummary {
+  id: string;
+  type: string;
+  pool: Pool | null;
+  team: number;
+  path: VehiclePathPoint[];
+  dwell: VehicleDwell[];
+  distanceM: number;
+  maxSpeedKmh: number;
+  avgSpeedKmh: number;
+  activeMs: number;
+  standingMs: number;
+  firstSeenMs: number;
+  lastSeenMs: number;
+  destroyedMs?: number;
+}
+
 export interface Round {
   meta: RoundMeta;
   players: Record<string, RoundPlayer>;
@@ -235,6 +268,7 @@ export interface Round {
   analysis: RoundAnalysis;
   deaths: DeathReport[];
   terrain: TerrainGrid;
+  vehicleTracks: VehicleTrackSummary[];
   /** the raw normalized events, kept for the points engine + drill-down */
   events: TimelineEvent[];
 }

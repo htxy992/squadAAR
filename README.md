@@ -57,6 +57,10 @@ Other scripts:
   more useful for line-of-sight than a flat image.
 - **Mortar / indirect fire** — lobbed shells animate along an arc and burst with
   a **blast-radius** ring at impact; impacts also appear in the event feed.
+- **Vehicle movement analysis** — per-vehicle **routes**, a movement **heatmap**,
+  and **dwell markers** showing where each vehicle stood (overwatch/camp), with a
+  Vehicles panel grouped by **class & type** (distance, avg/max speed, standing
+  time, holds, destroyed). Click a vehicle or panel row to trace its route.
 - Scrub or play the round back (1–16×), with smooth interpolation between snapshots.
 - **Players** coloured by team, with view-direction, wounded state, names (toggle).
 - **Vehicles** with hull HP ring, turret facing, per-component status and Elo pool.

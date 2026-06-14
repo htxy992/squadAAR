@@ -34,6 +34,8 @@ export async function renderAAR(view, roundId) {
     mk('tg-terrain', 'Terrain (hillshade)', true),
     mk('tg-elev', 'Elevation heat', false),
     mk('tg-contours', 'Contours', false),
+    mk('tg-vehroutes', 'Vehicle routes', false),
+    mk('tg-vehheat', 'Vehicle heatmap', false),
     mk('tg-tracers', 'Shots / tracers', true),
     mk('tg-animate', 'Animate bullets', true),
     mk('tg-impacts', 'Impacts (hit/miss)', true),
@@ -53,13 +55,14 @@ export async function renderAAR(view, roundId) {
   const selPanel = el('div', { class: 'panel' }, [el('h3', { text: 'Selected' }), el('div', { class: 'sel-body sel-empty', text: 'Click a player or vehicle on the map.' })]);
   const engagePanel = el('div', { class: 'panel hidden' });
   const analysisPanel = el('div', { class: 'panel' });
+  const vehPanel = el('div', { class: 'panel' });
   const feedPanel = el('div', { class: 'panel' }, [el('h3', { text: 'Event feed' }), el('div', { class: 'feed' })]);
 
   const left = el('div', { class: 'left' }, [
     el('span', { class: 'back', text: '← Back to rounds', onclick: () => (location.hash = '#/rounds') }),
     mapWrap, controls, toggles, legend, scoreboard
   ]);
-  const right = el('div', { class: 'right' }, [infoPanel, selPanel, engagePanel, analysisPanel, feedPanel]);
+  const right = el('div', { class: 'right' }, [infoPanel, selPanel, engagePanel, vehPanel, analysisPanel, feedPanel]);
   view.append(el('div', { class: 'aar' }, [left, right]));
 
   // ---- renderer ----------------------------------------------------------
@@ -69,6 +72,12 @@ export async function renderAAR(view, roundId) {
 
   // ---- panels (static) ---------------------------------------------------
   renderInfo(infoPanel, bundle);
+  renderVehicles(vehPanel, bundle, (vt) => {
+    r.routeVehicleId = r.routeVehicleId === vt.id ? null : vt.id;
+    r.opts.vehRoutes = true;
+    if (r.routeVehicleId) { setTime(vt.firstSeenMs); pause(); }
+    highlightVehRows(vehPanel, r.routeVehicleId);
+  });
   renderAnalysis(analysisPanel, bundle, jumpToProjectile);
   renderScoreboard(scoreboard.querySelector('.scoreboard'), bundle);
   buildFeed(feedPanel.querySelector('.feed'), bundle, (ev) => {
@@ -98,6 +107,8 @@ export async function renderAAR(view, roundId) {
   toggles.querySelector('#tg-terrain').onchange = (e) => (r.opts.terrain = e.target.checked);
   toggles.querySelector('#tg-elev').onchange = (e) => (r.opts.elevation = e.target.checked);
   toggles.querySelector('#tg-contours').onchange = (e) => (r.opts.contours = e.target.checked);
+  toggles.querySelector('#tg-vehroutes').onchange = (e) => (r.opts.vehRoutes = e.target.checked);
+  toggles.querySelector('#tg-vehheat').onchange = (e) => (r.opts.vehHeat = e.target.checked);
   toggles.querySelector('#tg-tracers').onchange = (e) => (r.opts.tracers = e.target.checked);
   toggles.querySelector('#tg-animate').onchange = (e) => (r.opts.animate = e.target.checked);
   toggles.querySelector('#tg-impacts').onchange = (e) => (r.opts.impacts = e.target.checked);
@@ -114,6 +125,7 @@ export async function renderAAR(view, roundId) {
     r.selected = hit ? { kind: hit.kind, id: hit.id } : null;
     r.highlightEngagement = null;
     engagePanel.classList.add('hidden');
+    if (hit && hit.kind === 'vehicle') { r.routeVehicleId = hit.id; highlightVehRows(vehPanel, hit.id); }
     updateSelected();
   });
 
@@ -352,6 +364,31 @@ function renderEngagement(panel, d, onJump) {
       panel.append(el('div', { style: 'height:4px;background:#1f2c39;border-radius:3px;overflow:hidden;margin:0 0 5px', html: `<div style="height:100%;width:${pct}%;background:${c.eosID === d.killerEOSID ? '#f87171' : '#a78bfa'}"></div>` }));
     }
   }
+}
+
+function renderVehicles(panel, bundle, onPick) {
+  const vts = bundle.vehicleTracks || [];
+  clear(panel).append(el('h3', { text: `Vehicles — ${vts.length} (routes & dwell)` }));
+  if (!vts.length) { panel.append(el('div', { class: 'muted', text: 'No vehicle telemetry in this round.' })); return; }
+  // group by pool/class
+  const groups = {};
+  for (const v of vts) (groups[v.pool || 'Other'] ??= []).push(v);
+  for (const pool of Object.keys(groups).sort()) {
+    panel.append(el('div', { class: 'muted', style: 'margin-top:8px', text: pool }));
+    for (const v of groups[pool]) {
+      const standMin = (v.standingMs / 60000).toFixed(1);
+      const row = el('div', { class: 'ev veh-row', 'data-id': v.id, onclick: () => onPick(v) }, [
+        el('span', { class: 'dot', style: `background:${v.team === 1 ? '#3b82f6' : '#ef4444'}` }),
+        el('span', { html:
+          `<b>${v.type}</b> <span class="muted">T${v.team}</span><br>` +
+          `<span class="muted">${(v.distanceM / 1000).toFixed(1)} km · avg ${v.avgSpeedKmh} / max ${v.maxSpeedKmh} km/h · stood ${standMin} min · ${v.dwell.length} holds${v.destroyedMs != null ? ' · <span style="color:#f87171">destroyed</span>' : ''}</span>` })
+      ]);
+      panel.append(row);
+    }
+  }
+}
+function highlightVehRows(panel, id) {
+  for (const row of panel.querySelectorAll('.veh-row')) row.style.background = row.getAttribute('data-id') === id ? '#1d2a38' : '';
 }
 
 function drawProfile(cv, prof) {

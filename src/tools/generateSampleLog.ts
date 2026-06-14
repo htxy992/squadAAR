@@ -110,6 +110,7 @@ interface Sim {
   isSL: boolean;
   isMedic: boolean;
   vehicle?: Vehicle;
+  holdUntil?: number;
 }
 
 interface Line {
@@ -203,10 +204,12 @@ function main() {
     };
   }
   // assign 2 crew per vehicle from each team's first squad, mark crewman role
+  const assignedCrew = new Set<string>();
   for (const v of vehicles) {
     const crewRole = v.team === 1 ? 'USA_Crewman_01' : 'RUS_Crewman_01';
-    const cand = players.filter((p) => p.team === v.team && p.squad === 1).slice(0, 2);
-    for (const c of cand.splice(0, 2)) {
+    const cand = players.filter((p) => p.team === v.team && !assignedCrew.has(p.eos) && !p.isSL && !p.isMedic).slice(0, 2);
+    for (const c of cand) {
+      assignedCrew.add(c.eos);
       c.role = crewRole;
       c.soldierClass = SOLDIER(crewRole);
       c.vehicle = v;
@@ -279,14 +282,20 @@ function main() {
         if (t >= p.respawnAt) respawn(p, t);
         else continue;
       }
-      // revive wounded medics nearby
-      const obj = p.vehicle ? p.vehicle.pos : objectiveFor(p.team, tNorm);
-      const tx = obj.x + (rand() - 0.5) * 45000;
-      const ty = obj.y + (rand() - 0.5) * 45000;
+      // crews hold overwatch positions periodically -> creates routes + dwell
+      if (p.vehicle && p.holdUntil && t < p.holdUntil) continue;
+      const obj = p.vehicle ? objectiveFor(p.team, tNorm) : objectiveFor(p.team, tNorm);
+      const spread = p.vehicle ? 60000 : 45000;
+      const tx = obj.x + (rand() - 0.5) * spread;
+      const ty = obj.y + (rand() - 0.5) * spread;
       const spd = p.vehicle ? 4200 : 1500;
       p.pos.x += clampMag(tx - p.pos.x, spd);
       p.pos.y += clampMag(ty - p.pos.y, spd);
       p.yaw = (Math.atan2(ty - p.pos.y, tx - p.pos.x) * 180) / Math.PI;
+      // once near the objective, a crew may set up and hold (overwatch / camp)
+      if (p.vehicle && Math.hypot(obj.x - p.pos.x, obj.y - p.pos.y) < 50000 && (!p.holdUntil || t > p.holdUntil + 30000) && rand() < 0.3) {
+        p.holdUntil = t + 60000 + Math.floor(rand() * 120000);
+      }
     }
     // vehicles follow their crew driver
     for (const v of vehicles) {
