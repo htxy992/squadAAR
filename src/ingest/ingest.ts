@@ -2,6 +2,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { parseLog, splitRounds } from '../parser/logParser.js';
 import { buildRound } from '../timeline/build.js';
+import { resolveMap } from '../maps/mapRegistry.js';
+import { tryLoadHeightmapField } from '../maps/heightmap.js';
 import { computePoints } from '../points/squadPoints.js';
 import { processRound, computeBalance, type EloState } from '../elo/squadElo.js';
 import { Store, type RoundBundle } from '../store/store.js';
@@ -32,7 +34,12 @@ export async function ingestLogFile(file: string, store: Store, eloState: EloSta
     ).length;
     if (activity < 20) continue;
 
-    const round = buildRound(chunk, { source: baseName });
+    // use a real DEM (heightmap PNG) for terrain/LOS if one exists for this map
+    const newGame = chunk.find((e) => e.type === 'NEW_GAME') as any;
+    const map = resolveMap(newGame?.layerClassname ?? newGame?.mapClassname);
+    const terrainField = tryLoadHeightmapField(map) ?? undefined;
+
+    const round = buildRound(chunk, { source: baseName, terrainField });
     const report = computePoints(round);
     const eloReport = processRound(report, eloState);
     const balance = computeBalance(report, eloState);

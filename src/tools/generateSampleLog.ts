@@ -39,7 +39,7 @@ const HILLS: Hill[] = [
   { cx: -80000, cy: 60000, h: 3000, r: 26000 },
   { cx: 70000, cy: -70000, h: 3500, r: 28000 }
 ];
-function terrainZ(x: number, y: number): number {
+export function terrainZ(x: number, y: number): number {
   let z = 1000 + 600 * Math.sin(x / 30000) * Math.cos(y / 28000);
   for (const hl of HILLS) z += hl.h * Math.exp(-((x - hl.cx) ** 2 + (y - hl.cy) ** 2) / (2 * hl.r ** 2));
   return z;

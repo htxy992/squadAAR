@@ -14,16 +14,28 @@ export interface MapInfo {
   assetKey: string;
   sizeMeters: number;
   world: { minX: number; minY: number; maxX: number; maxY: number };
+  /** elevation range (metres) used to scale a grayscale heightmap into a DEM */
+  heightMin?: number;
+  heightMax?: number;
 }
 
 const M = 100; // metres -> centimetres
-function mk(name: string, assetKey: string, keys: string[], c0: [number, number], c1: [number, number]): MapInfo {
+function mk(
+  name: string,
+  assetKey: string,
+  keys: string[],
+  c0: [number, number],
+  c1: [number, number],
+  height?: [number, number]
+): MapInfo {
   return {
     name,
     assetKey,
     keys,
     sizeMeters: Math.round(c1[0] - c0[0]),
-    world: { minX: c0[0] * M, minY: c0[1] * M, maxX: c1[0] * M, maxY: c1[1] * M }
+    world: { minX: c0[0] * M, minY: c0[1] * M, maxX: c1[0] * M, maxY: c1[1] * M },
+    heightMin: height?.[0],
+    heightMax: height?.[1]
   };
 }
 
@@ -36,7 +48,7 @@ export const MAPS: MapInfo[] = [
   mk('Fools Road', 'foolsroad', ['fools', 'foolsroad'], [-1604, -1636], [1396, 1364]),
   mk('Goose Bay', 'goosebay', ['goosebay', 'goose_bay'], [-2016, -2016], [2015, 2015]),
   mk('Gorodok', 'gorodok', ['gorodok'], [-2032, -2032], [2032, 2032]),
-  mk('Harju', 'harju', ['harju'], [-2016, -2016], [2016, 2016]),
+  mk('Harju', 'harju', ['harju'], [-2016, -2016], [2016, 2016], [0, 70]),
   mk('Kamdesh', 'kamdesh', ['kamdesh'], [-2024, -2024], [2024, 2024]),
   mk('Kohat', 'kohat', ['kohat'], [-2300, -2300], [2317, 2317]),
   mk('Kokan', 'kokan', ['kokan'], [-1334, -1334], [1334, 1334]),

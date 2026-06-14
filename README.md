@@ -38,6 +38,7 @@ Other scripts:
 | --- | --- |
 | `npm run gen:sample` | write `data/logs/SquadGame-sample.log` only |
 | `npm run fetch:maps -- [keys...]` | fetch real minimap images into `web/assets/maps/` (OWI assets, not committed) |
+| `npm run gen:heightmap` | synthesize the sample round's matching DEM (`npm run demo` does this automatically) |
 | `npm run ingest -- <log...>` | ingest one or more real/sample logs (`--reset` to wipe first) |
 | `npm run serve` | start API + web UI on `:8787` (`PORT` env to change) |
 | `npm test` | run the unit + integration test suite |
@@ -167,9 +168,12 @@ pragmatic choices noted here:
 - **Heals / hitzones / spotting.** Heal points use the documented ~0.95/ revive
   approximation; precise hitzone-from-damage-curve and spotting accuracy points
   (the spec marks spotting as unreleased) are out of scope.
-- **Terrain field.** Plausibility uses ground height estimated from observed
-  entity positions (no real heightmap), so occlusion confidence scales with
-  coverage. A real DEM/heightmap would make it exact.
+- **Terrain field.** If a real DEM is present (`web/assets/maps/<key>/heightmap.png`,
+  a 16-bit grayscale heightmap, decoded server-side), it drives hillshade,
+  contours, line-of-sight occlusion and the engagement profile **exactly**. The
+  bundled demo synthesizes a matching DEM; for real maps drop in the SDK
+  heightmap. Without one, terrain is estimated from observed positions and
+  occlusion confidence scales with coverage.
 - **Vehicle crews.** Crew→pool attribution is by nearest co-located vehicle; the
   full 5-minute responsibility window model is simplified.
 

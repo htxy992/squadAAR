@@ -17,7 +17,8 @@ import { MAPS } from '../maps/mapRegistry.js';
 
 const BASE = process.env.SQUAD_MAP_ASSET_BASE ?? 'https://squadcalc.app/img/maps';
 const OUT = path.resolve(process.cwd(), 'web/assets/maps');
-const FILES = ['basemap.webp', ...(process.env.FETCH_HEIGHTMAPS ? ['terrainmap.webp'] : [])];
+// basemap = minimap; heightmap.png = DEM (decoded server-side for exact terrain/LOS)
+const FILES = ['basemap.webp', ...(process.env.FETCH_HEIGHTMAPS ? ['heightmap.png', 'terrainmap.webp'] : [])];
 
 const wanted = process.argv.slice(2).map((s) => s.toLowerCase());
 const maps = MAPS.filter((m) => m.assetKey && (!wanted.length || wanted.includes(m.assetKey) || wanted.includes(m.name.toLowerCase())));

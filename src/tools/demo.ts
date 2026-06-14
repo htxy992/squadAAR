@@ -6,6 +6,7 @@
 import { Store } from '../store/store.js';
 import { ingestFiles } from '../ingest/ingest.js';
 import { writeSampleLog } from './generateSampleLog.js';
+import { writeSampleHeightmap } from './genSampleHeightmap.js';
 
 const store = new Store();
 await store.reset();
@@ -13,6 +14,10 @@ await store.reset();
 console.log('Generating sample server log…');
 const log = await writeSampleLog();
 console.log('  ->', log);
+
+console.log('Generating matching DEM heightmap…');
+const hm = await writeSampleHeightmap();
+console.log('  ->', hm);
 
 console.log('Ingesting (parse -> timeline -> SquadPoints -> SquadElo)…');
 await ingestFiles([log], store);

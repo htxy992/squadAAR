@@ -70,10 +70,16 @@ position and `to` = the impact point.
 
 Each map is calibrated to its real SDK minimap world bounds in
 `src/maps/mapRegistry.ts`. `npm run fetch:maps` downloads the in-game minimap
-images into `web/assets/maps/<assetKey>/basemap.(webp|png|jpg)` (these are
-Offworld Industries assets and are git-ignored). When present the UI renders the
-real map; otherwise it renders reconstructed-terrain hillshade. Point the fetcher
-at any mirror with `SQUAD_MAP_ASSET_BASE`.
+into `web/assets/maps/<assetKey>/basemap.(webp|png|jpg)` (OWI assets, git-ignored).
+When present the UI renders the real map; otherwise it renders reconstructed
+terrain. Point the fetcher at any mirror with `SQUAD_MAP_ASSET_BASE`.
+
+**Exact terrain (DEM).** Drop a 16-bit grayscale heightmap at
+`web/assets/maps/<assetKey>/heightmap.png` (`FETCH_HEIGHTMAPS=1 npm run fetch:maps`,
+or your SDK export). It is decoded server-side at ingest and used as the terrain
+field for hillshade, contours, line-of-sight occlusion and the "why you died"
+elevation profile — making them pixel-exact. Set the map's `heightMin`/`heightMax`
+(metres) in `mapRegistry.ts` so samples scale to real elevations.
 
 ### Map calibration
 

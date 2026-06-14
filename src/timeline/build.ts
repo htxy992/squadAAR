@@ -59,6 +59,8 @@ export interface BuildOptions {
   id?: string;
   serverName?: string;
   source?: string;
+  /** pre-loaded real DEM (from a heightmap); overrides reconstructed terrain */
+  terrainField?: TerrainField;
 }
 
 export function buildRound(events: TimelineEvent[], opts: BuildOptions = {}): Round {
@@ -352,10 +354,13 @@ export function buildRound(events: TimelineEvent[], opts: BuildOptions = {}): Ro
   mapEvents.sort((a, b) => a.tMs - b.tMs);
 
   // ---- terrain height field (shared: analysis + deaths + client render) --
-  const terrainPts: Vec3[] = [];
-  for (const arr of pTracks.values()) for (const s of arr) terrainPts.push(s.pos);
-  for (const v of vTracks.values()) for (const s of v.samples) terrainPts.push(s.pos);
-  const field = buildTerrainField(map.world, terrainPts);
+  let field = opts.terrainField;
+  if (!field) {
+    const terrainPts: Vec3[] = [];
+    for (const arr of pTracks.values()) for (const s of arr) terrainPts.push(s.pos);
+    for (const v of vTracks.values()) for (const s of v.samples) terrainPts.push(s.pos);
+    field = buildTerrainField(map.world, terrainPts);
+  }
 
   // ---- projectile detection + plausibility analysis -----------------
   const analysis = buildAnalysis({ events, field, pTracks, nameToEos, eosToName, teamOf, np, rel });
