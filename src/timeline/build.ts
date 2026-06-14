@@ -2,8 +2,8 @@ import type { TimelineEvent, Vec3 } from '../parser/events.js';
 import { resolveMap, worldToNorm, type MapInfo } from '../maps/mapRegistry.js';
 import { infantryPoolForRole, type Pool } from '../elo/pools.js';
 import { classifyVehicleType } from '../elo/vehicleTypes.js';
-import { buildTerrainField, analyzeProjectile, classifyWeapon, type TerrainField } from '../analysis/ballistics.js';
-import type { ProjectileTrack, PlayerSuspicion, RoundAnalysis, DeathReport, DamageContribution } from './types.js';
+import { buildTerrainField, terrainHeightAt, analyzeProjectile, classifyWeapon, type TerrainField } from '../analysis/ballistics.js';
+import type { ProjectileTrack, PlayerSuspicion, RoundAnalysis, DeathReport, DamageContribution, TerrainGrid } from './types.js';
 import type {
   Round,
   RoundMeta,
@@ -351,23 +351,19 @@ export function buildRound(events: TimelineEvent[], opts: BuildOptions = {}): Ro
 
   mapEvents.sort((a, b) => a.tMs - b.tMs);
 
+  // ---- terrain height field (shared: analysis + deaths + client render) --
+  const terrainPts: Vec3[] = [];
+  for (const arr of pTracks.values()) for (const s of arr) terrainPts.push(s.pos);
+  for (const v of vTracks.values()) for (const s of v.samples) terrainPts.push(s.pos);
+  const field = buildTerrainField(map.world, terrainPts);
+
   // ---- projectile detection + plausibility analysis -----------------
-  const analysis = buildAnalysis({
-    events,
-    startTime,
-    map,
-    pTracks,
-    vTracks,
-    nameToEos,
-    eosToName,
-    teamOf,
-    np,
-    rel,
-    bounds: map.world
-  });
+  const analysis = buildAnalysis({ events, field, pTracks, nameToEos, eosToName, teamOf, np, rel });
 
   // ---- deaths / 1v1 engagements ("why you died") --------------------
-  const deaths = buildDeaths({ events, startTime, pTracks, nameToEos, eosToName, teamOf, np, rel, projectiles: analysis.projectiles });
+  const deaths = buildDeaths({ events, field, pTracks, nameToEos, eosToName, teamOf, np, rel, projectiles: analysis.projectiles });
+
+  const terrain = serializeTerrain(field);
 
   // ---- final tickets / faction inference ----------------------------
   const finalTickets: Record<number, number> = {};
@@ -392,14 +388,26 @@ export function buildRound(events: TimelineEvent[], opts: BuildOptions = {}): Ro
     source: opts.source
   };
 
-  return { meta, players, snapshots, mapEvents, analysis, deaths, events };
+  return { meta, players, snapshots, mapEvents, analysis, deaths, terrain, events };
+}
+
+function serializeTerrain(field: TerrainField): TerrainGrid {
+  const heights = new Array(field.cells.length);
+  let min = Infinity, max = -Infinity;
+  for (let i = 0; i < field.cells.length; i++) {
+    const m = field.cells[i] / 100; // cm -> m
+    heights[i] = Math.round(m * 10) / 10;
+    if (m < min) min = m;
+    if (m > max) max = m;
+  }
+  return { grid: field.grid, minX: field.minX, minY: field.minY, maxX: field.maxX, maxY: field.maxY, min, max, heights, coverage: field.coverage };
 }
 
 /* ----------------------------- death reports ----------------------------- */
 
 interface DeathCtx {
   events: TimelineEvent[];
-  startTime: number;
+  field: TerrainField;
   pTracks: Map<string, PSample[]>;
   nameToEos: Map<string, string>;
   eosToName: Map<string, string>;
@@ -460,6 +468,36 @@ function buildDeaths(c: DeathCtx): DeathReport[] {
         (p) => p.victimEOSID === victimEos && p.shooterEOSID === killerEos && Math.abs(p.tMs - tRel) < 2500
       );
 
+      // elevation + line-of-sight profile killer -> victim
+      let killerElevationM: number | undefined;
+      let victimElevationM: number | undefined;
+      let highGroundM: number | undefined;
+      let elevationProfile: { ground: number[]; line: number[] } | undefined;
+      let hasLineOfSight: boolean | undefined = proj?.plausibility.hasLineOfSight;
+      if (kPos && vPos) {
+        killerElevationM = round1(terrainHeightAt(c.field, kPos.x, kPos.y) / 100);
+        victimElevationM = round1(terrainHeightAt(c.field, vPos.x, vPos.y) / 100);
+        highGroundM = round1(killerElevationM - victimElevationM);
+        const a = proj ? proj.fromWorld : { x: kPos.x, y: kPos.y, z: kPos.z + 60 };
+        const bb = proj ? proj.toWorld : { x: vPos.x, y: vPos.y, z: vPos.z };
+        const N = 24;
+        const ground: number[] = [];
+        const line: number[] = [];
+        let blocked = false;
+        for (let i = 0; i <= N; i++) {
+          const t = i / N;
+          const px = a.x + (bb.x - a.x) * t;
+          const py = a.y + (bb.y - a.y) * t;
+          const g = terrainHeightAt(c.field, px, py) / 100;
+          const ln = (a.z + (bb.z - a.z) * t) / 100;
+          ground.push(round1(g));
+          line.push(round1(ln));
+          if (i > 0 && i < N && g > ln + 1.5) blocked = true;
+        }
+        elevationProfile = { ground, line };
+        if (hasLineOfSight == null) hasLineOfSight = !blocked;
+      }
+
       out.push({
         tMs: tRel,
         victimEOSID: victimEos,
@@ -478,12 +516,21 @@ function buildDeaths(c: DeathCtx): DeathReport[] {
         contributors,
         plausibility: proj ? { score: proj.plausibility.score, flags: proj.plausibility.flags } : undefined,
         from: proj ? proj.from : kPos ? c.np(kPos) : undefined,
-        to: proj ? proj.to : vPos ? c.np(vPos) : undefined
+        to: proj ? proj.to : vPos ? c.np(vPos) : undefined,
+        killerElevationM,
+        victimElevationM,
+        highGroundM,
+        elevationProfile,
+        hasLineOfSight
       });
       if (victimEos) buf.delete(victimEos);
     }
   }
   return out;
+}
+
+function round1(v: number): number {
+  return Math.round(v * 10) / 10;
 }
 
 function isBulletWeapon(weapon?: string): boolean {
@@ -495,26 +542,19 @@ function isBulletWeapon(weapon?: string): boolean {
 
 interface AnalysisCtx {
   events: TimelineEvent[];
-  startTime: number;
-  map: MapInfo;
+  field: TerrainField;
   pTracks: Map<string, PSample[]>;
-  vTracks: Map<string, { type: string; team: number; samples: VSample[]; comp: Map<string, { t: number; health: number }[]> }>;
   nameToEos: Map<string, string>;
   eosToName: Map<string, string>;
   teamOf: Map<string, number>;
   np: (p: Vec3) => NormPos;
   rel: (t: number) => number;
-  bounds: { minX: number; minY: number; maxX: number; maxY: number };
 }
 
 const SUSPICION_THRESHOLD = 0.5;
 
 function buildAnalysis(c: AnalysisCtx): RoundAnalysis {
-  // terrain point cloud from every observed entity position
-  const pts: Vec3[] = [];
-  for (const arr of c.pTracks.values()) for (const s of arr) pts.push(s.pos);
-  for (const v of c.vTracks.values()) for (const s of v.samples) pts.push(s.pos);
-  const field: TerrainField = buildTerrainField(c.bounds, pts);
+  const field = c.field;
 
   const posAt = (eos: string | undefined, t: number): Vec3 | undefined => {
     if (!eos) return undefined;

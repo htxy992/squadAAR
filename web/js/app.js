@@ -61,14 +61,19 @@ weapon range and firing angle, surfacing wallbangs and impossible shots for the
 Auto-Mod / cheater-detection workflow.</li>
 </ul>
 <h3>Map replay & engagements</h3>
-<p>Scrub or play the round back. Players show team, view direction, wounded
+<p>The map renders the reconstructed <b>terrain as hillshade</b>, with toggleable
+<b>contours</b> and an <b>elevation heatmap</b> so you can read ridgelines and high
+ground. Scrub or play the round back. Players show team, view direction, wounded
 state; vehicles show hull HP, turret facing, component status and pool; flags
 show capture progress. <b>Bullets are animated</b> along their trajectory with
 muzzle flashes, tracer streaks and impact markers (hit vs miss); suspicious
-shots draw red. Click a player — or any kill in the feed — to open the
+shots draw red.</p>
+<p>Click a player — or any kill in the feed — to open the
 <b>1v1 engagement / "why you died"</b> view: the killer→victim sightline and
-distance, weapon, headshot, killing-shot plausibility and the full
-damage-taken-this-life breakdown.</p>
+distance, weapon, headshot, <b>elevation / high-ground</b>, <b>line-of-sight
+(clear or blocked by terrain)</b> with a <b>terrain cross-section profile</b> of
+the shot, killing-shot plausibility, and the full damage-taken-this-life
+breakdown — a definitive answer to “why did I die?”.</p>
 <p class="muted">The provided logs were client-side and lack combat/position
 events, so the bundled sample is a synthetic <i>server</i> log in the exact same
 format — swap in real server logs with <code>npm run ingest</code>.</p>

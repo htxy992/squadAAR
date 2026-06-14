@@ -196,6 +196,27 @@ export interface DeathReport {
   /** killing-shot endpoints for drawing the engagement */
   from?: NormPos;
   to?: NormPos;
+  /** ground elevation (m) at killer / victim, and the killer's height advantage */
+  killerElevationM?: number;
+  victimElevationM?: number;
+  highGroundM?: number;
+  /** terrain ground vs straight bullet-line height (m) sampled killer->victim */
+  elevationProfile?: { ground: number[]; line: number[] };
+  hasLineOfSight?: boolean;
+}
+
+/** Serializable terrain height grid (metres), for client hillshade/contours. */
+export interface TerrainGrid {
+  grid: number;
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  min: number;
+  max: number;
+  /** row-major heights in metres, index = y*grid + x */
+  heights: number[];
+  coverage: number;
 }
 
 export interface Round {
@@ -205,6 +226,7 @@ export interface Round {
   mapEvents: MapEvent[];
   analysis: RoundAnalysis;
   deaths: DeathReport[];
+  terrain: TerrainGrid;
   /** the raw normalized events, kept for the points engine + drill-down */
   events: TimelineEvent[];
 }

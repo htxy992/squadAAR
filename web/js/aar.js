@@ -30,6 +30,9 @@ export async function renderAAR(view, roundId) {
 
   const mk = (id, label, checked) => el('label', {}, [el('input', { type: 'checkbox', id, ...(checked ? { checked: 'checked' } : {}) }), ' ' + label]);
   const toggles = el('div', { class: 'toggles' }, [
+    mk('tg-terrain', 'Terrain (hillshade)', true),
+    mk('tg-elev', 'Elevation heat', false),
+    mk('tg-contours', 'Contours', false),
     mk('tg-tracers', 'Shots / tracers', true),
     mk('tg-animate', 'Animate bullets', true),
     mk('tg-impacts', 'Impacts (hit/miss)', true),
@@ -90,6 +93,9 @@ export async function renderAAR(view, roundId) {
   playBtn.onclick = () => (playing ? pause() : (currentMs >= duration && setTime(0), play()));
   scrub.oninput = () => { setTime(+scrub.value); pause(); };
   speedSel.onchange = () => (speed = +speedSel.value);
+  toggles.querySelector('#tg-terrain').onchange = (e) => (r.opts.terrain = e.target.checked);
+  toggles.querySelector('#tg-elev').onchange = (e) => (r.opts.elevation = e.target.checked);
+  toggles.querySelector('#tg-contours').onchange = (e) => (r.opts.contours = e.target.checked);
   toggles.querySelector('#tg-tracers').onchange = (e) => (r.opts.tracers = e.target.checked);
   toggles.querySelector('#tg-animate').onchange = (e) => (r.opts.animate = e.target.checked);
   toggles.querySelector('#tg-impacts').onchange = (e) => (r.opts.impacts = e.target.checked);
@@ -314,6 +320,22 @@ function renderEngagement(panel, d, onJump) {
       `<span>Headshot</span><span>${d.headshot ? 'yes' : 'no'}</span>` +
       `<span>Time</span><span class="num">${fmtClock(d.tMs)}</span>` })
   );
+  // elevation / line-of-sight — the heart of "why did I die"
+  if (d.killerElevationM != null) {
+    const hg = d.highGroundM ?? 0;
+    const hgTxt = Math.abs(hg) < 1 ? 'about level' : hg > 0 ? `killer +${hg.toFixed(0)} m HIGH GROUND` : `you were +${(-hg).toFixed(0)} m above`;
+    panel.append(el('div', { class: 'statline', html:
+      `<span>Killer elevation</span><span class="num">${d.killerElevationM.toFixed(0)} m</span>` +
+      `<span>Your elevation</span><span class="num">${(d.victimElevationM ?? 0).toFixed(0)} m</span>` +
+      `<span>Elevation</span><span class="${hg > 1 ? 'neg' : ''}">${hgTxt}</span>` +
+      `<span>Line of sight</span><span class="${d.hasLineOfSight === false ? 'neg' : 'pos'}">${d.hasLineOfSight === false ? 'BLOCKED (terrain)' : 'clear'}</span>` }));
+  }
+  if (d.elevationProfile) {
+    panel.append(el('div', { class: 'muted', style: 'margin-top:6px', text: 'Terrain profile killer → you (red = bullet path)' }));
+    const cv = el('canvas', { width: 340, height: 90, style: 'width:100%;height:90px' });
+    panel.append(cv);
+    drawProfile(cv, d.elevationProfile);
+  }
   if (d.plausibility) {
     const s = d.plausibility.score;
     panel.append(el('div', { html: `<span class="muted">Killing-shot plausibility</span> <b style="color:${s < 0.5 ? '#f87171' : '#34d399'}">${s.toFixed(2)}</b>` }));
@@ -328,6 +350,33 @@ function renderEngagement(panel, d, onJump) {
       panel.append(el('div', { style: 'height:4px;background:#1f2c39;border-radius:3px;overflow:hidden;margin:0 0 5px', html: `<div style="height:100%;width:${pct}%;background:${c.eosID === d.killerEOSID ? '#f87171' : '#a78bfa'}"></div>` }));
     }
   }
+}
+
+function drawProfile(cv, prof) {
+  const ctx = cv.getContext('2d');
+  const W = cv.width, H = cv.height, pad = 6;
+  const all = prof.ground.concat(prof.line);
+  const min = Math.min(...all), max = Math.max(...all), range = max - min || 1;
+  const X = (i, n) => pad + (i / (n - 1)) * (W - 2 * pad);
+  const Y = (v) => pad + (1 - (v - min) / range) * (H - 2 * pad);
+  ctx.clearRect(0, 0, W, H);
+  // terrain fill
+  ctx.beginPath();
+  ctx.moveTo(X(0, prof.ground.length), H - pad);
+  prof.ground.forEach((g, i) => ctx.lineTo(X(i, prof.ground.length), Y(g)));
+  ctx.lineTo(X(prof.ground.length - 1, prof.ground.length), H - pad);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(120,140,160,0.35)'; ctx.fill();
+  ctx.strokeStyle = '#8aa0b4'; ctx.lineWidth = 1.5; ctx.beginPath();
+  prof.ground.forEach((g, i) => (i ? ctx.lineTo(X(i, prof.ground.length), Y(g)) : ctx.moveTo(X(i, prof.ground.length), Y(g))));
+  ctx.stroke();
+  // bullet line
+  ctx.strokeStyle = '#f87171'; ctx.lineWidth = 2; ctx.beginPath();
+  prof.line.forEach((l, i) => (i ? ctx.lineTo(X(i, prof.line.length), Y(l)) : ctx.moveTo(X(i, prof.line.length), Y(l))));
+  ctx.stroke();
+  // endpoints
+  ctx.fillStyle = '#fde68a'; ctx.beginPath(); ctx.arc(X(0, prof.line.length), Y(prof.line[0]), 3, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(X(prof.line.length - 1, prof.line.length), Y(prof.line[prof.line.length - 1]), 3, 0, Math.PI * 2); ctx.fill();
 }
 
 function sw(color, label) {

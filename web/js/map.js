@@ -10,7 +10,7 @@ export class MapRenderer {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.bundle = null;
-    this.opts = { tracers: true, animate: true, sightlines: false, impacts: true, suspiciousOnly: false, names: false };
+    this.opts = { terrain: true, contours: false, elevation: false, tracers: true, animate: true, sightlines: false, impacts: true, suspiciousOnly: false, names: false };
     this.selected = null; // { kind:'player'|'vehicle', id }
     this.follow = false;
     this.highlightProj = null;
@@ -25,7 +25,54 @@ export class MapRenderer {
     this.bundle = bundle;
     this.snaps = bundle.snapshots;
     this.step = this.snaps.length > 1 ? this.snaps[1].tMs - this.snaps[0].tMs : 1000;
+    this._prepTerrain();
     this._resize();
+  }
+
+  _prepTerrain() {
+    const t = this.bundle?.terrain;
+    this._hillshade = null; this._heat = null; this._contours = null;
+    if (!t || !t.heights || !t.grid) return;
+    const g = t.grid;
+    const h = (cx, cy) => t.heights[Math.min(g - 1, Math.max(0, cy)) * g + Math.min(g - 1, Math.max(0, cx))];
+    const range = t.max - t.min || 1;
+    const cellM = (t.maxX - t.minX) / 100 / g; // metres per cell
+    // light from NW
+    const L = (() => { const v = [-1, -1, 1.4]; const n = Math.hypot(...v); return v.map((x) => x / n); })();
+    const shadeImg = new ImageData(g, g);
+    const heatImg = new ImageData(g, g);
+    for (let py = 0; py < g; py++) {
+      const cy = g - 1 - py; // flip Y to match worldToNorm
+      for (let px = 0; px < g; px++) {
+        const dzdx = (h(px + 1, cy) - h(px - 1, cy)) / (2 * cellM);
+        const dzdy = (h(px, cy + 1) - h(px, cy - 1)) / (2 * cellM);
+        const nx = -dzdx, ny = dzdy, nz = 1;
+        const nl = Math.hypot(nx, ny, nz);
+        const shade = Math.max(0, (nx * L[0] + ny * L[1] + nz * L[2]) / nl); // 0..1
+        const base = 14 + shade * 30; // dark theme
+        const i = (py * g + px) * 4;
+        shadeImg.data[i] = base * 0.9; shadeImg.data[i + 1] = base; shadeImg.data[i + 2] = base * 1.15; shadeImg.data[i + 3] = 255;
+        // elevation heat (blue->green->yellow->red)
+        const e = (h(px, cy) - t.min) / range;
+        const [r, gg, b] = ramp(e);
+        heatImg.data[i] = r; heatImg.data[i + 1] = gg; heatImg.data[i + 2] = b; heatImg.data[i + 3] = 150;
+      }
+    }
+    this._hillshade = imgToCanvas(shadeImg);
+    this._heat = imgToCanvas(heatImg);
+    // contour segments (marching squares) in normalized coords
+    const levels = 9;
+    const segs = [];
+    for (let li = 1; li < levels; li++) {
+      const lv = t.min + (range * li) / levels;
+      for (let cy = 0; cy < g - 1; cy++) {
+        for (let cx = 0; cx < g - 1; cx++) {
+          const tl = h(cx, cy + 1), tr = h(cx + 1, cy + 1), br = h(cx + 1, cy), bl = h(cx, cy);
+          marchCell(cx, cy, g, lv, tl, tr, br, bl, segs);
+        }
+      }
+    }
+    this._contours = segs;
   }
 
   _resize() {
@@ -90,7 +137,13 @@ export class MapRenderer {
     ctx.setTransform(this._dpr, 0, 0, this._dpr, 0, 0);
     ctx.clearRect(0, 0, S, S);
     if (!this.bundle) return;
+    ctx.fillStyle = '#070b10';
+    ctx.fillRect(0, 0, S, S);
+    ctx.imageSmoothingEnabled = true;
+    if (this.opts.terrain && this._hillshade) ctx.drawImage(this._hillshade, 0, 0, S, S);
+    if (this.opts.elevation && this._heat) { ctx.globalAlpha = 0.55; ctx.drawImage(this._heat, 0, 0, S, S); ctx.globalAlpha = 1; }
     this._drawGrid();
+    if (this.opts.contours && this._contours) this._drawContours();
     const s = this.sampleAt(timeMs);
     const players = this._interpPlayers(s);
     const vehicles = this._interpVehicles(s);
@@ -109,10 +162,17 @@ export class MapRenderer {
     // follow selected -> nothing to pan (full map), but highlight handled in draw
   }
 
+  _drawContours() {
+    const ctx = this.ctx, S = this._size;
+    ctx.strokeStyle = 'rgba(150,200,255,0.10)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (const s of this._contours) { ctx.moveTo(s[0] * S, s[1] * S); ctx.lineTo(s[2] * S, s[3] * S); }
+    ctx.stroke();
+  }
+
   _drawGrid() {
     const ctx = this.ctx, S = this._size;
-    ctx.fillStyle = '#070b10';
-    ctx.fillRect(0, 0, S, S);
     const sizeM = this.bundle.meta.sizeMeters || 3000;
     const cells = Math.max(4, Math.round(sizeM / 300)); // 300m keypads
     ctx.strokeStyle = '#16212d';
@@ -293,7 +353,7 @@ export class MapRenderer {
       const fx = this.px(from), fy = this.py(from), tx = this.px(to), ty = this.py(to);
       // killing-shot sightline
       ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(tx, ty);
-      ctx.strokeStyle = d.plausibility && d.plausibility.score < 0.5 ? '#ff5d5d' : '#fbbf24';
+      ctx.strokeStyle = d.hasLineOfSight === false || (d.plausibility && d.plausibility.score < 0.5) ? '#ff5d5d' : '#fbbf24';
       ctx.lineWidth = 2.5; ctx.setLineDash([7, 5]); ctx.stroke(); ctx.setLineDash([]);
       // distance label at midpoint
       if (d.distanceM != null) {
@@ -383,6 +443,45 @@ export class MapRenderer {
       if (d < bestD) { bestD = d; best = { kind: 'vehicle', id: v.id, entity: v }; }
     }
     return best;
+  }
+}
+
+function ramp(t) {
+  // blue -> cyan -> green -> yellow -> red
+  const stops = [[40, 80, 160], [40, 160, 170], [70, 170, 80], [210, 190, 70], [200, 80, 60]];
+  const x = Math.max(0, Math.min(0.999, t)) * (stops.length - 1);
+  const i = Math.floor(x), f = x - i;
+  const a = stops[i], b = stops[i + 1];
+  return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+}
+function imgToCanvas(img) {
+  const c = document.createElement('canvas');
+  c.width = img.width; c.height = img.height;
+  c.getContext('2d').putImageData(img, 0, 0);
+  return c;
+}
+// marching squares for one cell -> push normalized segment(s) (Y flipped to match draw)
+function marchCell(cx, cy, g, lv, tl, tr, br, bl, segs) {
+  // corners: bl=(cx,cy) tl=(cx,cy+1) tr=(cx+1,cy+1) br=(cx+1,cy)
+  const idx = (bl > lv ? 1 : 0) | (br > lv ? 2 : 0) | (tr > lv ? 4 : 0) | (tl > lv ? 8 : 0);
+  if (idx === 0 || idx === 15) return;
+  const ix = (a, b, va, vb) => a + ((lv - va) / (vb - va)) * (b - a);
+  // edge points in grid coords (x right, y up)
+  const bottom = [ix(cx, cx + 1, bl, br), cy];
+  const top = [ix(cx, cx + 1, tl, tr), cy + 1];
+  const left = [cx, ix(cy, cy + 1, bl, tl)];
+  const right = [cx + 1, ix(cy, cy + 1, br, tr)];
+  const norm = (p) => [p[0] / (g - 1), 1 - p[1] / (g - 1)]; // flip Y
+  const seg = (p, q) => { const a = norm(p), b = norm(q); segs.push([a[0], a[1], b[0], b[1]]); };
+  switch (idx) {
+    case 1: case 14: seg(left, bottom); break;
+    case 2: case 13: seg(bottom, right); break;
+    case 3: case 12: seg(left, right); break;
+    case 4: case 11: seg(top, right); break;
+    case 6: case 9: seg(top, bottom); break;
+    case 7: case 8: seg(left, top); break;
+    case 5: seg(left, top); seg(bottom, right); break;
+    case 10: seg(left, bottom); seg(top, right); break;
   }
 }
 

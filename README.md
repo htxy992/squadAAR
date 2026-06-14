@@ -47,6 +47,10 @@ Other scripts:
 ## What you get
 
 ### Interactive AAR map replay
+- **Rendered terrain** — the reconstructed elevation drawn as **hillshade**, with
+  toggleable **contour lines** and an **elevation heatmap**, so ridgelines and
+  high ground are visible (more useful for line-of-sight than a flat minimap; drop
+  in a real minimap PNG too — see `web/assets/maps`).
 - Scrub or play the round back (1–16×), with smooth interpolation between snapshots.
 - **Players** coloured by team, with view-direction, wounded state, names (toggle).
 - **Vehicles** with hull HP ring, turret facing, per-component status and Elo pool.
@@ -57,8 +61,11 @@ Other scripts:
   full **sightlines** independently; suspicious shots draw red.
 - **1v1 engagement / "why you died"** — click any player (or a kill in the feed)
   to replay the engagement: the killer→victim sightline + distance, the killing
-  weapon, headshot flag, killing-shot plausibility, and the full *damage-taken-
-  this-life* breakdown (every attacker who damaged you, ranked).
+  weapon, headshot flag, **killer vs your elevation + high-ground**, **line-of-sight
+  (clear / blocked by terrain)** with a **terrain cross-section profile** (the red
+  bullet path drawn over the ground between you and your killer), killing-shot
+  plausibility, and the full *damage-taken-this-life* breakdown (every attacker
+  who damaged you, ranked).
 - Click any player/vehicle to inspect live + round stats; jump from the event feed.
 
 ### SquadPoints (chapter 3 of the spec)
