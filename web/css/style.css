@@ -117,7 +117,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .k-kill { background: var(--bad); } .k-revive { background: var(--good); }
 .k-flag_captured { background: var(--accent); } .k-fob_destroyed { background: #c084fc; }
 .k-vehicle_destroyed { background: #fb923c; } .k-teamkill { background: #fff; } .k-death { background: #64748b; }
-.k-fob_created { background: #38bdf8; }
+.k-fob_created { background: #38bdf8; } .k-explosion { background: #fb923c; }
 
 .susp-item { padding: 7px 8px; border: 1px solid var(--line); border-left: 3px solid var(--bad); border-radius: 7px; margin-bottom: 7px; cursor: pointer; }
 .susp-item:hover { background: #18222e; }

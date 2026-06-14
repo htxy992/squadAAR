@@ -360,6 +360,21 @@ export function buildRound(events: TimelineEvent[], opts: BuildOptions = {}): Ro
   // ---- projectile detection + plausibility analysis -----------------
   const analysis = buildAnalysis({ events, field, pTracks, nameToEos, eosToName, teamOf, np, rel });
 
+  // indirect-fire (mortar/artillery/rocket) impacts -> explosion markers
+  for (const pr of analysis.projectiles) {
+    if (pr.weaponFamily === 'explosive') {
+      mapEvents.push({
+        kind: 'explosion',
+        tMs: pr.tMs,
+        team: pr.team,
+        pos: pr.to,
+        label: `${pr.weapon ?? 'Explosive'} impact`,
+        radiusM: pr.weapon && /artillery|airstrike/i.test(pr.weapon) ? 50 : 35
+      });
+    }
+  }
+  mapEvents.sort((a, b) => a.tMs - b.tMs);
+
   // ---- deaths / 1v1 engagements ("why you died") --------------------
   const deaths = buildDeaths({ events, field, pTracks, nameToEos, eosToName, teamOf, np, rel, projectiles: analysis.projectiles });
 
@@ -375,6 +390,7 @@ export function buildRound(events: TimelineEvent[], opts: BuildOptions = {}): Ro
     layer,
     mapKey: map.keys[0] ?? map.name,
     mapName: map.name,
+    assetKey: map.assetKey,
     sizeMeters: map.sizeMeters,
     world: map.world,
     startTime,

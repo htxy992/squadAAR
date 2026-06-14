@@ -10,6 +10,9 @@ data/elo-state.json
 data/index.json
 !data/**/.gitkeep
 
+# Fetched game-map assets (OWI copyright — fetch locally via `npm run fetch:maps`)
+web/assets/maps/*/
+
 # Editor / OS
 .DS_Store
 .idea/

@@ -47,7 +47,7 @@ function terrainZ(x: number, y: number): number {
 const STAND = 95; // entity capsule offset above ground
 
 // ----------------------------- config --------------------------------------
-const HALF = 150000; // ±1500 m world (Harju ~3 km)
+const HALF = 195000; // ±1950 m world (Harju is ±2016 m)
 const PER_TEAM = 25;
 const TICK_MS = 5000;
 const DURATION_MS = 24 * 60 * 1000;
@@ -134,7 +134,7 @@ function main() {
   const flagNames = ['Ridgeline', 'Quarry', 'Central_Hill', 'Watchtower', 'Outpost'];
   const flags = flagNames.map((name, i) => {
     const f = i / (flagNames.length - 1);
-    return { name, x: -120000 + f * 240000, y: -120000 + f * 240000 };
+    return { name, x: -170000 + f * 340000, y: -170000 + f * 340000 };
   });
 
   // -- build rosters --------------------------------------------------------
@@ -175,8 +175,8 @@ function main() {
       });
     }
   };
-  mkTeam(1, USA_ROLES, -135000, -135000);
-  mkTeam(2, RUS_ROLES, 135000, 135000);
+  mkTeam(1, USA_ROLES, -185000, -185000);
+  mkTeam(2, RUS_ROLES, 185000, 185000);
 
   // -- vehicles -------------------------------------------------------------
   let vid = 2147500000;
@@ -252,7 +252,7 @@ function main() {
 
   const respawn = (p: Sim, now: number) => {
     const fob = fobs.find((f) => f.team === p.team && (!f.destroyMs || f.destroyMs > now));
-    const base = fob ? { x: fob.x, y: fob.y } : p.team === 1 ? { x: -135000, y: -135000 } : { x: 135000, y: 135000 };
+    const base = fob ? { x: fob.x, y: fob.y } : p.team === 1 ? { x: -185000, y: -185000 } : { x: 185000, y: 185000 };
     p.pos = { x: base.x + (rand() - 0.5) * 12000, y: base.y + (rand() - 0.5) * 12000 };
     p.alive = true;
     p.wounded = false;
@@ -413,6 +413,32 @@ function main() {
       tickets[2] -= 11;
     }
   }
+
+  // mortar barrages (indirect fire) onto contested objectives
+  function mortarBarrage(t: number, team: number, target: { x: number; y: number }, rounds: number) {
+    const shooter = players.find((p) => p.team === team && p.isSL) ?? players.find((p) => p.team === team);
+    if (!shooter) return;
+    // mortar emplacement well behind the line
+    const mortar = { x: shooter.pos.x, y: shooter.pos.y };
+    for (let i = 0; i < rounds; i++) {
+      const it = t + i * 4000;
+      const ix = target.x + (rand() - 0.5) * 12000;
+      const iy = target.y + (rand() - 0.5) * 12000;
+      const fromZ = terrainZ(mortar.x, mortar.y) + 100;
+      const toZ = terrainZ(ix, iy) + STAND;
+      emit(it, `LogSquadStats: Projectile: shooter=${shooter.eos} weapon=BP_Mortar_Projectile from=${mortar.x.toFixed(1)},${mortar.y.toFixed(1)},${fromZ.toFixed(1)} to=${ix.toFixed(1)},${iy.toFixed(1)},${toZ.toFixed(1)} speed=110 hit=1 victim=-`);
+      // sometimes catch an enemy in the blast
+      const caught = players.find((p) => p.alive && !p.wounded && p.team !== team && Math.hypot(p.pos.x - ix, p.pos.y - iy) < 4000);
+      if (caught) {
+        emit(it + 10, `LogSquad: Player:${caught.name} ActualDamage=140.000 from ${shooter.name} (Online IDs: EOS: ${shooter.eos} steam: ${shooter.steam} | Player Controller ID: ${shooter.controller})caused by BP_Mortar_Projectile_C`);
+        emit(it + 20, `LogSquadTrace: [DedicatedServer]ASQSoldier::Wound(): Player:${caught.name} KillingDamage=-140.000000 from ${shooter.controller} (Online IDs: EOS: ${shooter.eos} steam: ${shooter.steam} | Controller ID: ${shooter.controller}) caused by BP_Mortar_Projectile_C`);
+        emit(it + 1500, `LogSquadTrace: [DedicatedServer]ASQSoldier::Die(): Player:${caught.name} KillingDamage=-140.000000 from ${shooter.controller} (Online IDs: EOS: ${shooter.eos} steam: ${shooter.steam} | Contoller ID: ${shooter.controller}) caused by BP_Mortar_Projectile_C`);
+        caught.wounded = false; caught.alive = false; caught.respawnAt = it + 25000;
+      }
+    }
+  }
+  mortarBarrage(start + 9 * 60000, 1, flags[2], 6);
+  mortarBarrage(start + 19 * 60000, 2, flags[3], 7);
 
   // logistics deliveries
   for (let i = 0; i < 6; i++) {

@@ -60,6 +60,21 @@ LogSquadStats: MapMarker: eos=<eos> type=<Type> pos=<x>,<y>,<z>
 LogSquadStats: Projectile: shooter=<eos> weapon=<ClassName> from=<x>,<y>,<z> to=<x>,<y>,<z> speed=<m/s> hit=<0|1> victim=<eos|->
 ```
 
+`Projectile:` covers direct *and* indirect fire — a `weapon` whose class maps to
+the explosive/mortar/artillery family (e.g. `BP_Mortar_Projectile`) is rendered
+as a lobbed arc with a blast-radius burst and is exempt from line-of-sight
+occlusion checks (it arcs over terrain). Use `from` = the mortar/launcher
+position and `to` = the impact point.
+
+### Real maps (like SquadCalc)
+
+Each map is calibrated to its real SDK minimap world bounds in
+`src/maps/mapRegistry.ts`. `npm run fetch:maps` downloads the in-game minimap
+images into `web/assets/maps/<assetKey>/basemap.(webp|png|jpg)` (these are
+Offworld Industries assets and are git-ignored). When present the UI renders the
+real map; otherwise it renders reconstructed-terrain hillshade. Point the fetcher
+at any mirror with `SQUAD_MAP_ASSET_BASE`.
+
 ### Map calibration
 
 `src/maps/mapRegistry.ts` maps a layer name (e.g. `Harju_RAAS_v1`) to a map size

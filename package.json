@@ -11,6 +11,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "gen:sample": "tsx src/tools/generateSampleLog.ts",
+    "fetch:maps": "tsx src/tools/fetchMaps.ts",
     "ingest": "tsx src/tools/ingestCli.ts",
     "serve": "tsx src/api/server.ts",
     "demo": "tsx src/tools/demo.ts",

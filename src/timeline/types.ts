@@ -31,6 +31,7 @@ export interface RoundMeta {
   layer: string;
   mapKey: string;
   mapName: string;
+  assetKey: string;
   sizeMeters: number;
   world: { minX: number; minY: number; maxX: number; maxY: number };
   startTime: number;
@@ -105,7 +106,13 @@ export type MapEventKind =
   | 'fob_created'
   | 'fob_destroyed'
   | 'flag_captured'
-  | 'vehicle_destroyed';
+  | 'vehicle_destroyed'
+  | 'explosion';
+
+export interface MapEventExtra {
+  /** blast radius in metres for explosion markers */
+  radiusM?: number;
+}
 
 export interface MapEvent {
   kind: MapEventKind;
@@ -120,6 +127,7 @@ export interface MapEvent {
   attackerEOSID?: string;
   victimEOSID?: string;
   weapon?: string;
+  radiusM?: number;
 }
 
 export interface ProjectileTrack {

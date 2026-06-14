@@ -30,6 +30,7 @@ export async function renderAAR(view, roundId) {
 
   const mk = (id, label, checked) => el('label', {}, [el('input', { type: 'checkbox', id, ...(checked ? { checked: 'checked' } : {}) }), ' ' + label]);
   const toggles = el('div', { class: 'toggles' }, [
+    mk('tg-basemap', 'Base map', true),
     mk('tg-terrain', 'Terrain (hillshade)', true),
     mk('tg-elev', 'Elevation heat', false),
     mk('tg-contours', 'Contours', false),
@@ -43,7 +44,7 @@ export async function renderAAR(view, roundId) {
   ]);
   const legend = el('div', { class: 'legend' }, [
     sw('#3b82f6', 'Team 1'), sw('#ef4444', 'Team 2'), sw('#fbbf24', 'Wounded'),
-    sw('#fcd34d', 'Tracer'), sw('#f87171', 'Suspicious'), sw('#c084fc', 'FOB kill'), sw('#fb923c', 'Veh kill')
+    sw('#fcd34d', 'Tracer'), sw('#f87171', 'Suspicious'), sw('#c084fc', 'FOB kill'), sw('#fb923c', 'Mortar / blast')
   ]);
 
   const scoreboard = el('div', { class: 'panel' }, [el('h3', { text: 'Scoreboard' }), el('div', { class: 'scoreboard' })]);
@@ -93,6 +94,7 @@ export async function renderAAR(view, roundId) {
   playBtn.onclick = () => (playing ? pause() : (currentMs >= duration && setTime(0), play()));
   scrub.oninput = () => { setTime(+scrub.value); pause(); };
   speedSel.onchange = () => (speed = +speedSel.value);
+  toggles.querySelector('#tg-basemap').onchange = (e) => (r.opts.basemap = e.target.checked);
   toggles.querySelector('#tg-terrain').onchange = (e) => (r.opts.terrain = e.target.checked);
   toggles.querySelector('#tg-elev').onchange = (e) => (r.opts.elevation = e.target.checked);
   toggles.querySelector('#tg-contours').onchange = (e) => (r.opts.contours = e.target.checked);

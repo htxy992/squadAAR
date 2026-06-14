@@ -1,55 +1,60 @@
 /**
- * Per-map world<->image calibration.
+ * Per-map world<->image calibration, using the real Squad SDK minimap bounds
+ * (the same corner data SquadCalc uses). World coordinates in Squad logs are
+ * centimetres; SDK corners are metres, so bounds below are corner*100.
  *
- * Squad world coordinates are centimetres in an axis-aligned frame. To draw on a
- * (square) minimap image we need the world bounds that the image covers. UE's Y
- * axis points "down→up" opposite to image pixel Y, so the transform flips Y.
- *
- * The bounds below are reasonable defaults; for pixel-perfect overlay on a real
- * captured minimap, calibrate `world` to that image's corners.
+ * `assetKey` matches the SquadCalc/SDK folder name. If a real minimap image is
+ * present at web/assets/maps/<assetKey>/basemap.webp (fetch via `npm run
+ * fetch:maps`), the UI renders it; otherwise it renders reconstructed terrain.
  */
 
 export interface MapInfo {
-  /** layer/classname keys this entry matches (case-insensitive substring) */
   keys: string[];
-  /** display name */
   name: string;
-  /** size of one map side in metres (for the grid + scale) */
+  assetKey: string;
   sizeMeters: number;
-  /** world bounds in centimetres covered by the (square) minimap image */
   world: { minX: number; minY: number; maxX: number; maxY: number };
-  /** optional minimap image filename under web/assets/maps (else procedural grid) */
-  image?: string;
 }
 
-const DEFAULT_SIZE = 3000; // metres
-function squareBounds(sizeMeters: number) {
-  const half = (sizeMeters * 100) / 2; // cm
-  return { minX: -half, minY: -half, maxX: half, maxY: half };
+const M = 100; // metres -> centimetres
+function mk(name: string, assetKey: string, keys: string[], c0: [number, number], c1: [number, number]): MapInfo {
+  return {
+    name,
+    assetKey,
+    keys,
+    sizeMeters: Math.round(c1[0] - c0[0]),
+    world: { minX: c0[0] * M, minY: c0[1] * M, maxX: c1[0] * M, maxY: c1[1] * M }
+  };
 }
 
 export const MAPS: MapInfo[] = [
-  { keys: ['harju'], name: 'Harju', sizeMeters: 3000, world: squareBounds(3000) },
-  { keys: ['narva'], name: 'Narva', sizeMeters: 2900, world: squareBounds(2900) },
-  { keys: ['blackcoast', 'black_coast'], name: 'Black Coast', sizeMeters: 3600, world: squareBounds(3600) },
-  { keys: ['gorodok'], name: 'Gorodok', sizeMeters: 4000, world: squareBounds(4000) },
-  { keys: ['yehorivka'], name: 'Yehorivka', sizeMeters: 5000, world: squareBounds(5000) },
-  { keys: ['mutaha'], name: 'Mutaha', sizeMeters: 2800, world: squareBounds(2800) },
-  { keys: ['goosebay', 'goose_bay'], name: 'Goose Bay', sizeMeters: 4200, world: squareBounds(4200) },
-  { keys: ['manicouagan'], name: 'Manicouagan', sizeMeters: 4000, world: squareBounds(4000) },
-  { keys: ['kohat'], name: 'Kohat', sizeMeters: 4500, world: squareBounds(4500) },
-  { keys: ['fallujah'], name: 'Fallujah', sizeMeters: 3200, world: squareBounds(3200) },
-  { keys: ['albasrah', 'al_basrah', 'basrah'], name: 'Al Basrah', sizeMeters: 3200, world: squareBounds(3200) },
-  { keys: ['tallil'], name: 'Tallil Outskirts', sizeMeters: 3600, world: squareBounds(3600) },
-  { keys: ['skorpo'], name: 'Skorpo', sizeMeters: 4500, world: squareBounds(4500) },
-  { keys: ['chora'], name: 'Chora', sizeMeters: 4000, world: squareBounds(4000) },
-  { keys: ['anvil'], name: 'Anvil', sizeMeters: 3300, world: squareBounds(3300) },
-  { keys: ['sanxian'], name: 'Sanxian Islands', sizeMeters: 3600, world: squareBounds(3600) }
+  mk('Al Basrah', 'albasrah', ['albasrah', 'al_basrah', 'basrah'], [-2000, -2000], [2000, 2000]),
+  mk('Anvil', 'anvil', ['anvil'], [-2040, -2040], [1020, 1020]),
+  mk('Black Coast', 'blackcoast', ['blackcoast', 'black_coast'], [-2299, -2127], [2299, 2472]),
+  mk('Chora', 'chora', ['chora'], [-2464, -2664], [1600, 1400]),
+  mk('Fallujah', 'fallujah', ['fallujah'], [-1315, -1545], [1690, 1460]),
+  mk('Fools Road', 'foolsroad', ['fools', 'foolsroad'], [-1604, -1636], [1396, 1364]),
+  mk('Goose Bay', 'goosebay', ['goosebay', 'goose_bay'], [-2016, -2016], [2015, 2015]),
+  mk('Gorodok', 'gorodok', ['gorodok'], [-2032, -2032], [2032, 2032]),
+  mk('Harju', 'harju', ['harju'], [-2016, -2016], [2016, 2016]),
+  mk('Kamdesh', 'kamdesh', ['kamdesh'], [-2024, -2024], [2024, 2024]),
+  mk('Kohat', 'kohat', ['kohat'], [-2300, -2300], [2317, 2317]),
+  mk('Kokan', 'kokan', ['kokan'], [-1334, -1334], [1334, 1334]),
+  mk('Lashkar', 'lashkar', ['lashkar'], [-2755, -2755], [2245, 2245]),
+  mk('Logar', 'logar', ['logar'], [-849, -849], [851, 851]),
+  mk('Manicouagan', 'manicouagan', ['manicouagan'], [-2016, -2016], [2015, 2015]),
+  mk('Mestia', 'mestia', ['mestia'], [-1316, -1316], [1316, 1316]),
+  mk('Mutaha', 'mutaha', ['mutaha'], [-935, -1140], [1820, 1615]),
+  mk('Narva', 'narva', ['narva'], [-1390, -1402], [1410, 1398]),
+  mk('Sanxian Islands', 'sanxian', ['sanxian'], [-2300, -2050], [2300, 2550]),
+  mk('Skorpo', 'skorpo', ['skorpo'], [-3611, -3293], [3238, 3576]),
+  mk('Sumari', 'sumari', ['sumari'], [-1287, -1267], [1313, 1333]),
+  mk('Tallil Outskirts', 'tallil', ['tallil'], [-2340, -2340], [2340, 2340]),
+  mk('Yehorivka', 'yehorivka', ['yehorivka'], [-3302, -3302], [3048, 3048])
 ];
 
-const FALLBACK: MapInfo = { keys: [], name: 'Unknown', sizeMeters: DEFAULT_SIZE, world: squareBounds(DEFAULT_SIZE) };
+const FALLBACK: MapInfo = mk('Unknown', '', [], [-1500, -1500], [1500, 1500]);
 
-/** Resolve map info from a layer or map classname (e.g. "Harju_RAAS_v1"). */
 export function resolveMap(layerOrMap: string | undefined): MapInfo {
   if (!layerOrMap) return FALLBACK;
   const s = layerOrMap.toLowerCase();

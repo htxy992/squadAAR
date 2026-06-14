@@ -10,7 +10,8 @@ export class MapRenderer {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.bundle = null;
-    this.opts = { terrain: true, contours: false, elevation: false, tracers: true, animate: true, sightlines: false, impacts: true, suspiciousOnly: false, names: false };
+    this.opts = { basemap: true, terrain: true, contours: false, elevation: false, tracers: true, animate: true, sightlines: false, impacts: true, suspiciousOnly: false, names: false };
+    this._minimap = null;
     this.selected = null; // { kind:'player'|'vehicle', id }
     this.follow = false;
     this.highlightProj = null;
@@ -26,7 +27,24 @@ export class MapRenderer {
     this.snaps = bundle.snapshots;
     this.step = this.snaps.length > 1 ? this.snaps[1].tMs - this.snaps[0].tMs : 1000;
     this._prepTerrain();
+    this._loadMinimap();
     this._resize();
+  }
+
+  _loadMinimap() {
+    this._minimap = null;
+    this.hasMinimap = false;
+    const key = this.bundle?.meta?.assetKey;
+    if (!key) return;
+    const exts = ['basemap.webp', 'basemap.png', 'basemap.jpg'];
+    const tryNext = (i) => {
+      if (i >= exts.length) return;
+      const img = new Image();
+      img.onload = () => { this._minimap = img; this.hasMinimap = true; };
+      img.onerror = () => tryNext(i + 1);
+      img.src = `/assets/maps/${key}/${exts[i]}`;
+    };
+    tryNext(0);
   }
 
   _prepTerrain() {
@@ -140,7 +158,9 @@ export class MapRenderer {
     ctx.fillStyle = '#070b10';
     ctx.fillRect(0, 0, S, S);
     ctx.imageSmoothingEnabled = true;
-    if (this.opts.terrain && this._hillshade) ctx.drawImage(this._hillshade, 0, 0, S, S);
+    const haveBase = this._minimap && this.opts.basemap;
+    if (haveBase) ctx.drawImage(this._minimap, 0, 0, S, S);
+    if (this.opts.terrain && this._hillshade) { ctx.globalAlpha = haveBase ? 0.3 : 1; ctx.drawImage(this._hillshade, 0, 0, S, S); ctx.globalAlpha = 1; }
     if (this.opts.elevation && this._heat) { ctx.globalAlpha = 0.55; ctx.drawImage(this._heat, 0, 0, S, S); ctx.globalAlpha = 1; }
     this._drawGrid();
     if (this.opts.contours && this._contours) this._drawContours();
@@ -298,7 +318,9 @@ export class MapRenderer {
 
       const fx = this.px(pr.from), fy = this.py(pr.from);
       const tx = this.px(pr.to), ty = this.py(pr.to);
-      const baseCol = susp ? '#ff5d5d' : involved ? '#7dd3fc' : '#fcd34d';
+      const indirect = pr.weaponFamily === 'explosive' || pr.weaponFamily === 'grenade';
+      const baseCol = susp ? '#ff5d5d' : indirect ? '#fb923c' : involved ? '#7dd3fc' : '#fcd34d';
+      if (indirect) { this._drawIndirect(pr, timeMs, tEnd, linger, baseCol); continue; }
 
       // optional full sightline (faint), so you can see the shooter->victim line
       if (this.opts.sightlines || involved) {
@@ -386,6 +408,35 @@ export class MapRenderer {
     ctx.fillStyle = color; ctx.fillText(label, x + 14, y - 5);
   }
 
+  // indirect fire: lobbed arc + blast radius at impact
+  _drawIndirect(pr, timeMs, tEnd, linger, col) {
+    const ctx = this.ctx;
+    const fx = this.px(pr.from), fy = this.py(pr.from), tx = this.px(pr.to), ty = this.py(pr.to);
+    const sizeM = this.bundle.meta.sizeMeters || 3000;
+    const radius = ((pr.weaponFamily === 'explosive' ? 35 : 18) / sizeM) * this._size;
+    // bow the path perpendicular to fake a lobbed trajectory in top-down
+    const mx = (fx + tx) / 2, my = (fy + ty) / 2;
+    const dx = tx - fx, dy = ty - fy, len = Math.hypot(dx, dy) || 1;
+    const bow = Math.min(40, len * 0.18);
+    const ctrl = { x: mx - (dy / len) * bow, y: my + (dx / len) * bow };
+    if (timeMs <= tEnd) {
+      const prog = this.opts.animate ? (timeMs - pr.tMs) / (tEnd - pr.tMs) : 1;
+      ctx.beginPath(); ctx.moveTo(fx, fy); ctx.quadraticCurveTo(ctrl.x, ctrl.y, tx, ty);
+      ctx.strokeStyle = hexA(col, 0.5); ctx.setLineDash([4, 4]); ctx.lineWidth = 1.5; ctx.stroke(); ctx.setLineDash([]);
+      // shell along the curve
+      const t = prog, it = 1 - t;
+      const sx = it * it * fx + 2 * it * t * ctrl.x + t * t * tx;
+      const sy = it * it * fy + 2 * it * t * ctrl.y + t * t * ty;
+      ctx.beginPath(); ctx.arc(sx, sy, 2.5, 0, Math.PI * 2); ctx.fillStyle = '#ffd9a0'; ctx.fill();
+    } else if (this.opts.impacts) {
+      const a = 1 - (timeMs - tEnd) / linger;
+      ctx.beginPath(); ctx.arc(tx, ty, radius, 0, Math.PI * 2);
+      ctx.fillStyle = hexA(col, 0.18 * a); ctx.fill();
+      ctx.strokeStyle = hexA(col, 0.8 * a); ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = hexA('#fff1d6', a); ctx.beginPath(); ctx.arc(tx, ty, 3, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
   _hitBurst(x, y, a, susp, age) {
     const ctx = this.ctx;
     const col = susp ? '#ff5d5d' : '#fb7185';
@@ -427,6 +478,11 @@ export class MapRenderer {
       } else if (ev.kind === 'flag_captured') {
         ctx.fillStyle = hexA('#f5b942', a);
         ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.fill();
+      } else if (ev.kind === 'explosion') {
+        const sizeM = this.bundle.meta.sizeMeters || 3000;
+        const rad = (((ev.radiusM || 35)) / sizeM) * this._size;
+        ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI * 2);
+        ctx.strokeStyle = hexA('#fb923c', 0.6 * a); ctx.lineWidth = 1.5; ctx.stroke();
       }
     }
   }

@@ -37,6 +37,7 @@ Other scripts:
 | script | purpose |
 | --- | --- |
 | `npm run gen:sample` | write `data/logs/SquadGame-sample.log` only |
+| `npm run fetch:maps -- [keys...]` | fetch real minimap images into `web/assets/maps/` (OWI assets, not committed) |
 | `npm run ingest -- <log...>` | ingest one or more real/sample logs (`--reset` to wipe first) |
 | `npm run serve` | start API + web UI on `:8787` (`PORT` env to change) |
 | `npm test` | run the unit + integration test suite |
@@ -47,10 +48,14 @@ Other scripts:
 ## What you get
 
 ### Interactive AAR map replay
-- **Rendered terrain** — the reconstructed elevation drawn as **hillshade**, with
-  toggleable **contour lines** and an **elevation heatmap**, so ridgelines and
-  high ground are visible (more useful for line-of-sight than a flat minimap; drop
-  in a real minimap PNG too — see `web/assets/maps`).
+- **Real Squad minimaps** (like SquadCalc) — every map is calibrated to its true
+  SDK world bounds, so positions overlay correctly. Drop the in-game minimap in
+  via `npm run fetch:maps` (assets are OWI's, so they're fetched locally, never
+  committed). Without them it falls back to **reconstructed terrain** drawn as
+  **hillshade**, with toggleable **contour lines** and an **elevation heatmap** —
+  more useful for line-of-sight than a flat image.
+- **Mortar / indirect fire** — lobbed shells animate along an arc and burst with
+  a **blast-radius** ring at impact; impacts also appear in the event feed.
 - Scrub or play the round back (1–16×), with smooth interpolation between snapshots.
 - **Players** coloured by team, with view-direction, wounded state, names (toggle).
 - **Vehicles** with hull HP ring, turret facing, per-component status and Elo pool.
