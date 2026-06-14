@@ -1,0 +1,17 @@
+node_modules/
+dist/
+*.log
+!docs/**/*.log
+
+# Generated/ingested data (kept out of VCS; sample is regenerable via `npm run demo`)
+data/rounds/*.json
+data/logs/*.log
+data/elo-state.json
+data/index.json
+!data/**/.gitkeep
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.tsbuildinfo

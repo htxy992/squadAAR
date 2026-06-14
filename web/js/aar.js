@@ -1,0 +1,262 @@
+import { getJSON, el, clear, fmtClock, teamColor, signed } from './util.js';
+import { MapRenderer } from './map.js';
+
+export async function renderAAR(view, roundId) {
+  clear(view);
+  view.append(el('div', { class: 'loading', text: 'Loading round…' }));
+  let bundle;
+  try {
+    bundle = await getJSON(`/api/rounds/${encodeURIComponent(roundId)}`);
+  } catch (e) {
+    clear(view).append(el('div', { class: 'loading', text: 'Round not found.' }));
+    return;
+  }
+  clear(view);
+
+  const meta = bundle.meta;
+  const duration = meta.durationMs;
+
+  // ---- DOM ---------------------------------------------------------------
+  const canvas = el('canvas', { id: 'map' });
+  const clock = el('div', { class: 'map-clock', text: '00:00' });
+  const ticketsHud = el('div', { class: 'tickets-hud' });
+  const scale = el('div', { class: 'map-scale', text: `${meta.mapName} • ${(meta.sizeMeters / 1000).toFixed(1)} km • 300 m grid` });
+  const mapWrap = el('div', { class: 'map-wrap' }, [canvas, ticketsHud, clock, scale]);
+
+  const playBtn = el('button', { class: 'primary', text: '▶ Play' });
+  const scrub = el('input', { type: 'range', min: '0', max: String(duration), value: '0', step: '500', class: 'scrub' });
+  const speedSel = el('select', {}, ['1', '2', '4', '8', '16'].map((s) => el('option', { value: s, ...(s === '8' ? { selected: 'selected' } : {}) }, `${s}×`)));
+  const controls = el('div', { class: 'controls' }, [playBtn, scrub, el('span', { class: 'speed' }, [speedSel])]);
+
+  const mk = (id, label, checked) => el('label', {}, [el('input', { type: 'checkbox', id, ...(checked ? { checked: 'checked' } : {}) }), ' ' + label]);
+  const toggles = el('div', { class: 'toggles' }, [
+    mk('tg-tracers', 'Tracers / projectiles', true),
+    mk('tg-susp', 'Suspicious only', false),
+    mk('tg-names', 'Player names', false),
+    mk('tg-follow', 'Follow selected', false)
+  ]);
+  const legend = el('div', { class: 'legend' }, [
+    sw('#3b82f6', 'Team 1'), sw('#ef4444', 'Team 2'), sw('#fbbf24', 'Wounded'),
+    sw('#fcd34d', 'Tracer'), sw('#f87171', 'Suspicious'), sw('#c084fc', 'FOB kill'), sw('#fb923c', 'Veh kill')
+  ]);
+
+  const scoreboard = el('div', { class: 'panel' }, [el('h3', { text: 'Scoreboard' }), el('div', { class: 'scoreboard' })]);
+
+  const infoPanel = el('div', { class: 'panel' });
+  const selPanel = el('div', { class: 'panel' }, [el('h3', { text: 'Selected' }), el('div', { class: 'sel-body sel-empty', text: 'Click a player or vehicle on the map.' })]);
+  const analysisPanel = el('div', { class: 'panel' });
+  const feedPanel = el('div', { class: 'panel' }, [el('h3', { text: 'Event feed' }), el('div', { class: 'feed' })]);
+
+  const left = el('div', { class: 'left' }, [
+    el('span', { class: 'back', text: '← Back to rounds', onclick: () => (location.hash = '#/rounds') }),
+    mapWrap, controls, toggles, legend, scoreboard
+  ]);
+  const right = el('div', { class: 'right' }, [infoPanel, selPanel, analysisPanel, feedPanel]);
+  view.append(el('div', { class: 'aar' }, [left, right]));
+
+  // ---- renderer ----------------------------------------------------------
+  const r = new MapRenderer(canvas);
+  r.setRound(bundle);
+  requestAnimationFrame(() => r.setRound(bundle)); // ensure size after layout
+
+  // ---- panels (static) ---------------------------------------------------
+  renderInfo(infoPanel, bundle);
+  renderAnalysis(analysisPanel, bundle, jumpToProjectile);
+  renderScoreboard(scoreboard.querySelector('.scoreboard'), bundle);
+  buildFeed(feedPanel.querySelector('.feed'), bundle, (tms) => { setTime(tms); pause(); });
+
+  // ---- playback ----------------------------------------------------------
+  let currentMs = 0;
+  let playing = false;
+  let speed = 8;
+  let lastTs = 0;
+  let lastPanel = 0;
+
+  function setTime(ms) {
+    currentMs = Math.max(0, Math.min(duration, ms));
+    scrub.value = String(currentMs);
+  }
+  function pause() { playing = false; playBtn.textContent = '▶ Play'; }
+  function play() { playing = true; playBtn.textContent = '❚❚ Pause'; lastTs = performance.now(); }
+
+  playBtn.onclick = () => (playing ? pause() : (currentMs >= duration && setTime(0), play()));
+  scrub.oninput = () => { setTime(+scrub.value); pause(); };
+  speedSel.onchange = () => (speed = +speedSel.value);
+  toggles.querySelector('#tg-tracers').onchange = (e) => (r.opts.tracers = e.target.checked);
+  toggles.querySelector('#tg-susp').onchange = (e) => (r.opts.suspiciousOnly = e.target.checked);
+  toggles.querySelector('#tg-names').onchange = (e) => (r.opts.names = e.target.checked);
+  toggles.querySelector('#tg-follow').onchange = (e) => (r.follow = e.target.checked);
+
+  canvas.addEventListener('click', (ev) => {
+    const rect = canvas.getBoundingClientRect();
+    const cx = ((ev.clientX - rect.left) / rect.width) * r._size;
+    const cy = ((ev.clientY - rect.top) / rect.height) * r._size;
+    const hit = r.pick(cx, cy);
+    r.selected = hit ? { kind: hit.kind, id: hit.id } : null;
+    updateSelected();
+  });
+
+  function jumpToProjectile(pr) {
+    setTime(pr.tMs);
+    pause();
+    r.highlightProj = pr;
+    if (pr.shooterEOSID) r.selected = { kind: 'player', id: pr.shooterEOSID };
+    setTimeout(() => { r.highlightProj = null; }, 6000);
+    updateSelected();
+  }
+
+  function ticketsAt(ms) {
+    const idx = Math.max(0, Math.min(bundle.snapshots.length - 1, Math.round(ms / r.step)));
+    return bundle.snapshots[idx]?.tickets || {};
+  }
+
+  function updateSelected() {
+    const body = selPanel.querySelector('.sel-body');
+    if (!r.selected) { body.className = 'sel-body sel-empty'; body.textContent = 'Click a player or vehicle on the map.'; return; }
+    body.className = 'sel-body';
+    if (r.selected.kind === 'player') {
+      const live = (r._lastPlayers || []).find((p) => p.eosID === r.selected.id);
+      const rep = bundle.report.players.find((p) => p.eosID === r.selected.id);
+      const elo = bundle.eloReport.players.find((p) => p.eosID === r.selected.id);
+      if (!rep && !live) { body.textContent = '—'; return; }
+      const s = rep?.stats;
+      clear(body).append(
+        el('div', { html: `<b style="color:${teamColor(rep?.team ?? live?.team, true)}">${rep?.name ?? live?.name}</b> <span class="muted">T${rep?.team ?? live?.team} · ${rep?.pool ?? live?.role ?? ''}</span>` }),
+        live ? el('div', { class: 'muted', text: `state ${live.state} · hp ${Math.round(live.health)} · squad ${live.squad ?? '-'}` }) : null,
+        rep ? el('div', { class: 'statline', html:
+          `<span>Points</span><span class="num">${rep.totalPoints}</span>` +
+          `<span>Kills / Wounds</span><span class="num">${s.kills} / ${s.wounds}</span>` +
+          `<span>Deaths / TK</span><span class="num">${s.deaths} / ${s.teamkills}</span>` +
+          `<span>Revives</span><span class="num">${s.revivesGiven}</span>` +
+          `<span>Dmg inf / veh</span><span class="num">${Math.round(s.damageInfantry)} / ${Math.round(s.damageVehicle)}</span>` +
+          `<span>Longest kill</span><span class="num">${s.longestKillM} m</span>` +
+          `<span>Global Elo Δ</span><span class="num ${(elo?.globalDelta ?? 0) >= 0 ? 'pos' : 'neg'}">${elo ? signed(elo.globalDelta) : '-'}</span>`
+        }) : null,
+        rep ? el('a', { href: `#/player/${rep.eosID}`, text: 'open full player profile →' }) : null
+      );
+    } else {
+      const live = (r._lastVehicles || []).find((v) => v.id === r.selected.id);
+      if (!live) { body.textContent = '—'; return; }
+      const comps = Object.entries(live.components || {}).map(([k, v]) => `<span>${k}</span><span class="num">${Math.round(v)}</span>`).join('');
+      clear(body).append(
+        el('div', { html: `<b style="color:${teamColor(live.team, true)}">${live.type}</b> <span class="muted">${live.pool || ''} · T${live.team}</span>` }),
+        el('div', { class: 'statline', html:
+          `<span>Hull HP</span><span class="num">${Math.round(live.health)} / ${Math.round(live.maxHealth)}</span>` +
+          `<span>Turret yaw</span><span class="num">${Math.round(live.turretYaw ?? 0)}°</span>` + comps })
+      );
+    }
+  }
+
+  function tick(ts) {
+    if (playing) {
+      const dt = ts - lastTs; lastTs = ts;
+      setTime(currentMs + dt * speed);
+      if (currentMs >= duration) pause();
+    }
+    r.draw(currentMs);
+    clock.textContent = fmtClock(currentMs);
+    const tk = ticketsAt(currentMs);
+    clear(ticketsHud).append(
+      el('span', { class: 't1', text: `${tk[1] ?? '—'}` }),
+      el('span', { class: 'muted', text: '–' }),
+      el('span', { class: 't2', text: `${tk[2] ?? '—'}` })
+    );
+    if (ts - lastPanel > 150) { lastPanel = ts; updateSelected(); highlightFeed(feedPanel.querySelector('.feed'), currentMs); }
+    raf = requestAnimationFrame(tick);
+  }
+  let raf = requestAnimationFrame(tick);
+
+  // cleanup on navigation
+  window.addEventListener('hashchange', () => cancelAnimationFrame(raf), { once: true });
+}
+
+/* ---------------------------- panel renderers ---------------------------- */
+
+function renderInfo(panel, bundle) {
+  const m = bundle.meta;
+  const winner = m.winnerTeam;
+  clear(panel).append(
+    el('h3', { text: 'Round' }),
+    el('div', { html: `<b style="font-size:16px">${m.mapName}</b> <span class="muted">${m.layer}</span>` }),
+    el('div', { class: 'kv', html: `<span class="muted">Winner</span><span class="${winner === 1 ? 't1' : 't2'}">Team ${winner ?? '—'} ${m.factions?.[winner] ? '(' + m.factions[winner] + ')' : ''}</span>` }),
+    el('div', { class: 'kv', html: `<span class="muted">Final tickets</span><span><span class="t1">${m.finalTickets?.[1] ?? '—'}</span> – <span class="t2">${m.finalTickets?.[2] ?? '—'}</span></span>` }),
+    el('div', { class: 'kv', html: `<span class="muted">Duration</span><span>${(m.durationMs / 60000).toFixed(1)} min</span>` }),
+    el('div', { class: 'kv', html: `<span class="muted">Players</span><span>${m.playerCount}</span>` }),
+    el('div', { class: 'kv', html: `<span class="muted">Team points</span><span><span class="t1">${Math.round(bundle.report.global.teamPoints?.[1] ?? 0)}</span> – <span class="t2">${Math.round(bundle.report.global.teamPoints?.[2] ?? 0)}</span></span>` }),
+    el('hr', {}),
+    el('div', { class: 'kv', html: `<span class="muted">Predicted win (Elo)</span><span><span class="t1">${Math.round((bundle.balance.team1.win_chance) * 100)}%</span> – <span class="t2">${Math.round((bundle.balance.team2.win_chance) * 100)}%</span></span>` }),
+    el('div', { class: 'kv', html: `<span class="muted">Avg team Elo</span><span><span class="t1">${Math.round(bundle.balance.team1.avg_elo)}</span> – <span class="t2">${Math.round(bundle.balance.team2.avg_elo)}</span></span>` })
+  );
+}
+
+function renderAnalysis(panel, bundle, onJump) {
+  const a = bundle.analysis;
+  clear(panel).append(el('h3', { text: `Projectile analysis — ${a.suspicious.length} flagged / ${a.projectiles.length}` }));
+  if (!a.suspicious.length) { panel.append(el('div', { class: 'muted', text: 'No implausible shots detected.' })); return; }
+  for (const pr of a.suspicious.slice(0, 30)) {
+    const score = pr.plausibility.score;
+    panel.append(el('div', { class: 'susp-item', onclick: () => onJump(pr) }, [
+      el('div', { html: `<span class="score" style="color:${score < 0.3 ? '#f87171' : '#fbbf24'}">${score.toFixed(2)}</span> ` +
+        `<b>${pr.shooterName ?? '?'}</b> <span class="muted">${pr.weaponFamily} · ${Math.round(pr.rangeM)} m · ${fmtClock(pr.tMs)}</span>` }),
+      el('div', { class: 'flags', text: pr.plausibility.flags.join(' · ') })
+    ]));
+  }
+}
+
+function renderScoreboard(node, bundle) {
+  const rows = bundle.report.players;
+  const eloById = new Map(bundle.eloReport.players.map((e) => [e.eosID, e]));
+  const table = el('table');
+  table.append(el('tr', {}, ['#', 'Player', 'T', 'Pool', 'Pts', 'K', 'W', 'D', 'Rev', 'ΔElo'].map((h, i) =>
+    el('th', { class: i >= 4 ? 'num' : '' }, h))));
+  rows.forEach((p, i) => {
+    const e = eloById.get(p.eosID);
+    const tr = el('tr', { class: 'click', onclick: () => (location.hash = `#/player/${p.eosID}`) }, [
+      el('td', { class: 'num', text: i + 1 }),
+      el('td', { html: `<span style="color:${teamColor(p.team, true)}">${p.name}</span>` }),
+      el('td', { text: p.team }),
+      el('td', { text: p.pool }),
+      el('td', { class: 'num', text: p.totalPoints }),
+      el('td', { class: 'num', text: p.stats.kills }),
+      el('td', { class: 'num', text: p.stats.wounds }),
+      el('td', { class: 'num', text: p.stats.deaths }),
+      el('td', { class: 'num', text: p.stats.revivesGiven }),
+      el('td', { class: `num ${(e?.globalDelta ?? 0) >= 0 ? 'pos' : 'neg'}`, text: e ? signed(e.globalDelta) : '-' })
+    ]);
+    table.append(tr);
+  });
+  clear(node).append(table);
+}
+
+function buildFeed(node, bundle, onJump) {
+  clear(node);
+  for (const ev of bundle.mapEvents) {
+    const row = el('div', { class: 'ev', 'data-tms': ev.tMs, onclick: () => onJump(ev.tMs) }, [
+      el('span', { class: `dot k-${ev.kind}` }),
+      el('span', { class: 'tm', text: fmtClock(ev.tMs) }),
+      el('span', { text: ev.label })
+    ]);
+    row.style.opacity = '0.25';
+    node.append(row);
+  }
+}
+
+let _lastFeedIdx = -1;
+function highlightFeed(node, currentMs) {
+  const rows = node.children;
+  let lastVisible = -1;
+  for (let i = 0; i < rows.length; i++) {
+    const tms = +rows[i].getAttribute('data-tms');
+    const on = tms <= currentMs;
+    rows[i].style.opacity = on ? (currentMs - tms < 6000 ? '1' : '0.6') : '0.18';
+    if (on) lastVisible = i;
+  }
+  if (lastVisible !== _lastFeedIdx && lastVisible >= 0) {
+    _lastFeedIdx = lastVisible;
+    rows[lastVisible].scrollIntoView({ block: 'nearest' });
+  }
+}
+
+function sw(color, label) {
+  return el('span', {}, [el('span', { class: 'swatch', style: `background:${color}` }), label]);
+}

@@ -1,0 +1,24 @@
+{
+  "name": "squad-aar",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Server-side Squad After-Action-Report (AAR) system with an integrated SquadElo rating system. Parses Squad server logs into an event timeline, reconstructs the round, computes SquadPoints + SquadElo, and serves an interactive map replay.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "gen:sample": "tsx src/tools/generateSampleLog.ts",
+    "ingest": "tsx src/tools/ingestCli.ts",
+    "serve": "tsx src/api/server.ts",
+    "demo": "tsx src/tools/demo.ts",
+    "test": "tsx --test tests/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
