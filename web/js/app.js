@@ -87,6 +87,7 @@ format — swap in real server logs with <code>npm run ingest</code>.</p>
 async function route() {
   const hash = location.hash || '#/rounds';
   const [, page, arg] = hash.split('/');
+  document.body.classList.toggle('aar-mode', page === 'aar');
   document.querySelectorAll('.tabs a').forEach((a) => a.classList.toggle('active', a.getAttribute('data-tab') === page));
   try {
     if (page === 'aar' && arg) await renderAAR(view, decodeURIComponent(arg));

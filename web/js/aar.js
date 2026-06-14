@@ -16,18 +16,43 @@ export async function renderAAR(view, roundId) {
   const meta = bundle.meta;
   const duration = meta.durationMs;
 
-  // ---- DOM ---------------------------------------------------------------
+  // ===== top bar (REPLAY) =================================================
+  const tkA = el('div', { class: 'rt-tk a', text: '—' });
+  const tkB = el('div', { class: 'rt-tk b', text: '—' });
+  const topTime = el('span', { class: 'rt-v', text: '00:00' });
+  const topState = el('span', { class: 'rt-v', text: meta.winnerTeam ? `Team ${meta.winnerTeam} won` : 'Replay' });
+  const search = el('input', { class: 'rt-search', type: 'text', placeholder: 'Search player / vehicle…' });
+  const btnMenu = el('button', { class: 'rt-btn', text: 'MENU' });
+  const btnVeh = el('button', { class: 'rt-btn', text: 'VEHICLES' });
+  const btnScore = el('button', { class: 'rt-btn', text: 'SCOREBOARD' });
+  const replayTop = el('div', { class: 'replay-top' }, [
+    el('div', { class: 'rt-brand', text: 'REPLAY', onclick: () => (location.hash = '#/rounds') }),
+    el('div', { class: 'rt-info' }, [el('span', { class: 'rt-k', text: 'MAP' }), el('span', { class: 'rt-v', text: meta.layer }), el('span', { class: 'rt-k', text: 'TIME' }), topTime, el('span', { class: 'rt-k', text: 'STATE' }), topState]),
+    el('div', { class: 'rt-scoreboard' }, [
+      el('div', { class: 'rt-side' }, [tkA, el('div', { class: 'rt-fac', text: meta.factions?.[1] || 'Team 1' })]),
+      el('div', { class: 'rt-vs', text: 'VS' }),
+      el('div', { class: 'rt-side' }, [tkB, el('div', { class: 'rt-fac', text: meta.factions?.[2] || 'Team 2' })])
+    ]),
+    el('div', { class: 'rt-info' }, [el('span', { class: 'rt-k', text: 'PLAYERS' }), el('span', { class: 'rt-v', text: String(meta.playerCount) })]),
+    el('div', { class: 'rt-grow' }),
+    search,
+    el('div', { class: 'rt-btns' }, [btnMenu, btnVeh, btnScore])
+  ]);
+
+  // ===== map =====
   const canvas = el('canvas', { id: 'map' });
-  const clock = el('div', { class: 'map-clock', text: '00:00' });
-  const ticketsHud = el('div', { class: 'tickets-hud' });
-  const scale = el('div', { class: 'map-scale', text: `${meta.mapName} • ${(meta.sizeMeters / 1000).toFixed(1)} km • 300 m grid` });
-  const mapWrap = el('div', { class: 'map-wrap' }, [canvas, ticketsHud, clock, scale]);
+  const mapCol = el('div', { class: 'map-col' }, [el('div', { class: 'map-wrap' }, [canvas])]);
 
-  const playBtn = el('button', { class: 'primary', text: '▶ Play' });
-  const scrub = el('input', { type: 'range', min: '0', max: String(duration), value: '0', step: '500', class: 'scrub' });
-  const speedSel = el('select', {}, ['1', '2', '4', '8', '16'].map((s) => el('option', { value: s, ...(s === '8' ? { selected: 'selected' } : {}) }, `${s}×`)));
-  const controls = el('div', { class: 'controls' }, [playBtn, scrub, el('span', { class: 'speed' }, [speedSel])]);
+  // ===== left sidebar: selected / engagement =====
+  const selClose = el('button', { class: 'sel-x', text: '✕' });
+  const selPanel = el('div', { class: 'panel' }, [
+    el('div', { class: 'sel-head' }, [el('h3', { class: 'sel-title', text: 'SELECTED' }), selClose]),
+    el('div', { class: 'sel-body sel-empty', text: 'Click a player or vehicle on the map, or a name in the scoreboard.' })
+  ]);
+  const engagePanel = el('div', { class: 'panel hidden' });
+  const sideLeft = el('div', { class: 'side-left' }, [selPanel, engagePanel]);
 
+  // ===== right sidebar: tabbed panes =====
   const mk = (id, label, checked) => el('label', {}, [el('input', { type: 'checkbox', id, ...(checked ? { checked: 'checked' } : {}) }), ' ' + label]);
   const toggles = el('div', { class: 'toggles' }, [
     mk('tg-basemap', 'Base map', true),
@@ -48,61 +73,67 @@ export async function renderAAR(view, roundId) {
     sw('#3b82f6', 'Team 1'), sw('#ef4444', 'Team 2'), sw('#fbbf24', 'Wounded'),
     sw('#fcd34d', 'Tracer'), sw('#f87171', 'Suspicious'), sw('#c084fc', 'FOB kill'), sw('#fb923c', 'Mortar / blast')
   ]);
-
-  const scoreboard = el('div', { class: 'panel' }, [el('h3', { text: 'Scoreboard' }), el('div', { class: 'scoreboard' })]);
-
   const infoPanel = el('div', { class: 'panel' });
-  const selPanel = el('div', { class: 'panel' }, [el('h3', { text: 'Selected' }), el('div', { class: 'sel-body sel-empty', text: 'Click a player or vehicle on the map.' })]);
-  const engagePanel = el('div', { class: 'panel hidden' });
-  const analysisPanel = el('div', { class: 'panel' });
-  const vehPanel = el('div', { class: 'panel' });
-  const feedPanel = el('div', { class: 'panel' }, [el('h3', { text: 'Event feed' }), el('div', { class: 'feed' })]);
+  const layersPanel = el('div', { class: 'panel' }, [el('h3', { text: 'Map layers' }), toggles, legend]);
+  const menuPane = el('div', { class: 'tab-pane hidden' }, [infoPanel, layersPanel]);
+  const teamsPanel = el('div', { class: 'panel tab-pane hidden' });
+  const vehPanel = el('div', { class: 'panel tab-pane hidden' });
+  const analysisPanel = el('div', { class: 'panel tab-pane hidden' });
+  const feedCount = el('span', { class: 'feed-count' });
+  const feedPanel = el('div', { class: 'panel tab-pane' }, [el('div', { class: 'feed-head' }, [el('h3', { text: 'KILL FEED' }), feedCount]), el('div', { class: 'feed killfeed' })]);
+  const tabBtns = {
+    feed: el('button', { class: 'tab active', text: 'Kill feed' }),
+    score: el('button', { class: 'tab', text: 'Scoreboard' }),
+    veh: el('button', { class: 'tab', text: 'Vehicles' }),
+    anal: el('button', { class: 'tab', text: 'Analysis' }),
+    menu: el('button', { class: 'tab', text: 'Menu' })
+  };
+  const sideRight = el('div', { class: 'side-right' }, [el('div', { class: 'tabs-row' }, Object.values(tabBtns)), feedPanel, teamsPanel, vehPanel, analysisPanel, menuPane]);
 
-  const left = el('div', { class: 'left' }, [
-    el('span', { class: 'back', text: '← Back to rounds', onclick: () => (location.hash = '#/rounds') }),
-    mapWrap, controls, toggles, legend, scoreboard
+  // ===== bottom transport bar =====
+  const playBtn = el('button', { class: 'bb-play', text: '▶' });
+  const scrub = el('input', { type: 'range', min: '0', max: String(duration), value: '0', step: '500', class: 'scrub' });
+  const tlTicks = el('div', { class: 'tl-ticks' });
+  const tlTrack = el('div', { class: 'tl-track' }, [scrub, tlTicks]);
+  const timeLabel = el('span', { class: 'bb-time', text: '00:00 / 00:00' });
+  const speeds = [0.5, 1, 2, 4, 8, 16];
+  const speedBtns = speeds.map((s) => el('button', { class: 'sp' + (s === 4 ? ' active' : ''), 'data-sp': String(s), text: s + '×' }));
+  const skip = (txt, fn) => el('button', { class: 'bb-skip', text: txt, onclick: fn });
+  const bottomBar = el('div', { class: 'bottom-bar' }, [
+    playBtn,
+    el('div', { class: 'bb-skips' }, [skip('«', () => { setTime(0); pause(); }), skip('‹', () => stepBy(-15000)), skip('›', () => stepBy(15000)), skip('»', () => { setTime(duration); pause(); })]),
+    timeLabel, tlTrack,
+    el('div', { class: 'bb-speeds' }, speedBtns),
+    el('div', { class: 'rt-grow' }),
+    el('span', { class: 'bb-src', text: `${bundle.snapshots.length} frames · ${meta.source || meta.id}` }),
+    el('button', { class: 'bb-exit', text: 'Exit', onclick: () => (location.hash = '#/rounds') })
   ]);
-  const right = el('div', { class: 'right' }, [infoPanel, selPanel, engagePanel, vehPanel, analysisPanel, feedPanel]);
-  view.append(el('div', { class: 'aar' }, [left, right]));
+
+  view.append(el('div', { class: 'aar' }, [replayTop, sideLeft, mapCol, sideRight, bottomBar]));
 
   // ---- renderer ----------------------------------------------------------
   const r = new MapRenderer(canvas);
   r.setRound(bundle);
   requestAnimationFrame(() => r.setRound(bundle)); // ensure size after layout
 
-  // ---- panels (static) ---------------------------------------------------
+  // ---- static panels -----------------------------------------------------
   renderInfo(infoPanel, bundle);
-  renderVehicles(vehPanel, bundle, (vt) => {
-    r.routeVehicleId = r.routeVehicleId === vt.id ? null : vt.id;
-    r.opts.vehRoutes = true;
-    if (r.routeVehicleId) { setTime(vt.firstSeenMs); pause(); }
-    highlightVehRows(vehPanel, r.routeVehicleId);
-  });
+  renderTeams(teamsPanel, bundle, (eos) => selectPlayer(eos));
+  renderVehicles(vehPanel, bundle, (vt) => onPickVeh(vt));
   renderAnalysis(analysisPanel, bundle, jumpToProjectile);
-  renderScoreboard(scoreboard.querySelector('.scoreboard'), bundle);
-  buildFeed(feedPanel.querySelector('.feed'), bundle, (ev) => {
-    const d = (bundle.deaths || []).find((x) => Math.abs(x.tMs - ev.tMs) < 50 && x.victimEOSID === ev.victimEOSID);
-    if (d) jumpToDeath(d);
-    else { setTime(ev.tMs); pause(); }
-  });
+  renderKillFeed(feedPanel.querySelector('.feed'), feedCount, bundle, onEventJump);
+  buildTicks(tlTicks, bundle, duration, onEventJump);
 
   // ---- playback ----------------------------------------------------------
-  let currentMs = 0;
-  let playing = false;
-  let speed = 8;
-  let lastTs = 0;
-  let lastPanel = 0;
-
-  function setTime(ms) {
-    currentMs = Math.max(0, Math.min(duration, ms));
-    scrub.value = String(currentMs);
-  }
-  function pause() { playing = false; playBtn.textContent = '▶ Play'; }
-  function play() { playing = true; playBtn.textContent = '❚❚ Pause'; lastTs = performance.now(); }
-
+  let currentMs = 0, playing = false, speed = 4, lastTs = 0, lastPanel = 0;
+  function setTime(ms) { currentMs = Math.max(0, Math.min(duration, ms)); scrub.value = String(currentMs); }
+  function stepBy(d) { setTime(currentMs + d); pause(); }
+  function pause() { playing = false; playBtn.textContent = '▶'; }
+  function play() { playing = true; playBtn.textContent = '❚❚'; lastTs = performance.now(); }
   playBtn.onclick = () => (playing ? pause() : (currentMs >= duration && setTime(0), play()));
   scrub.oninput = () => { setTime(+scrub.value); pause(); };
-  speedSel.onchange = () => (speed = +speedSel.value);
+  for (const btn of speedBtns) btn.onclick = () => { speed = +btn.getAttribute('data-sp'); speedBtns.forEach((b) => b.classList.toggle('active', b === btn)); };
+
   toggles.querySelector('#tg-basemap').onchange = (e) => (r.opts.basemap = e.target.checked);
   toggles.querySelector('#tg-terrain').onchange = (e) => (r.opts.terrain = e.target.checked);
   toggles.querySelector('#tg-elev').onchange = (e) => (r.opts.elevation = e.target.checked);
@@ -116,6 +147,30 @@ export async function renderAAR(view, roundId) {
   toggles.querySelector('#tg-susp').onchange = (e) => (r.opts.suspiciousOnly = e.target.checked);
   toggles.querySelector('#tg-names').onchange = (e) => (r.opts.names = e.target.checked);
   toggles.querySelector('#tg-follow').onchange = (e) => (r.follow = e.target.checked);
+
+  // tabs + top buttons
+  const panes = { feed: feedPanel, score: teamsPanel, veh: vehPanel, anal: analysisPanel, menu: menuPane };
+  function setTab(name) { for (const k in panes) panes[k].classList.toggle('hidden', k !== name); for (const k in tabBtns) tabBtns[k].classList.toggle('active', k === name); }
+  for (const k in tabBtns) tabBtns[k].onclick = () => setTab(k);
+  btnScore.onclick = () => setTab('score');
+  btnVeh.onclick = () => setTab('veh');
+  btnMenu.onclick = () => setTab('menu');
+  const findPlayer = (q) => bundle.report.players.find((p) => p.name.toLowerCase().includes(q.toLowerCase()));
+  search.onkeydown = (e) => { if (e.key === 'Enter' && search.value.trim()) { const p = findPlayer(search.value.trim()); if (p) selectPlayer(p.eosID); } };
+  selClose.onclick = () => { r.selected = null; r.highlightEngagement = null; engagePanel.classList.add('hidden'); updateSelected(); };
+
+  function selectPlayer(eos) { r.selected = { kind: 'player', id: eos }; r.highlightEngagement = null; engagePanel.classList.add('hidden'); updateSelected(); }
+  function onPickVeh(vt) {
+    r.routeVehicleId = r.routeVehicleId === vt.id ? null : vt.id;
+    r.opts.vehRoutes = true;
+    if (r.routeVehicleId) { setTime(vt.firstSeenMs); pause(); r.selected = { kind: 'vehicle', id: vt.id }; updateSelected(); }
+    highlightVehRows(vehPanel, r.routeVehicleId);
+  }
+  function onEventJump(ev) {
+    const d = (bundle.deaths || []).find((x) => Math.abs(x.tMs - ev.tMs) < 50 && x.victimEOSID === ev.victimEOSID);
+    if (d) jumpToDeath(d);
+    else { setTime(ev.tMs); pause(); }
+  }
 
   canvas.addEventListener('click', (ev) => {
     const rect = canvas.getBoundingClientRect();
@@ -203,14 +258,12 @@ export async function renderAAR(view, roundId) {
       if (currentMs >= duration) pause();
     }
     r.draw(currentMs);
-    clock.textContent = fmtClock(currentMs);
     const tk = ticketsAt(currentMs);
-    clear(ticketsHud).append(
-      el('span', { class: 't1', text: `${tk[1] ?? '—'}` }),
-      el('span', { class: 'muted', text: '–' }),
-      el('span', { class: 't2', text: `${tk[2] ?? '—'}` })
-    );
-    if (ts - lastPanel > 150) { lastPanel = ts; updateSelected(); highlightFeed(feedPanel.querySelector('.feed'), currentMs); }
+    tkA.textContent = tk[1] ?? '—';
+    tkB.textContent = tk[2] ?? '—';
+    topTime.textContent = fmtClock(currentMs);
+    timeLabel.textContent = `${fmtClock(currentMs)} / ${fmtClock(duration)}`;
+    if (ts - lastPanel > 150) { lastPanel = ts; if (r.selected) updateSelected(); highlightFeed(feedPanel.querySelector('.feed'), currentMs); }
     raf = requestAnimationFrame(tick);
   }
   let raf = requestAnimationFrame(tick);
@@ -252,41 +305,57 @@ function renderAnalysis(panel, bundle, onJump) {
   }
 }
 
-function renderScoreboard(node, bundle) {
-  const rows = bundle.report.players;
-  const eloById = new Map(bundle.eloReport.players.map((e) => [e.eosID, e]));
-  const table = el('table');
-  table.append(el('tr', {}, ['#', 'Player', 'T', 'Pool', 'Pts', 'K', 'W', 'D', 'Rev', 'ΔElo'].map((h, i) =>
-    el('th', { class: i >= 4 ? 'num' : '' }, h))));
-  rows.forEach((p, i) => {
-    const e = eloById.get(p.eosID);
-    const tr = el('tr', { class: 'click', onclick: () => (location.hash = `#/player/${p.eosID}`) }, [
-      el('td', { class: 'num', text: i + 1 }),
-      el('td', { html: `<span style="color:${teamColor(p.team, true)}">${p.name}</span>` }),
-      el('td', { text: p.team }),
-      el('td', { text: p.pool }),
-      el('td', { class: 'num', text: p.totalPoints }),
-      el('td', { class: 'num', text: p.stats.kills }),
-      el('td', { class: 'num', text: p.stats.wounds }),
-      el('td', { class: 'num', text: p.stats.deaths }),
-      el('td', { class: 'num', text: p.stats.revivesGiven }),
-      el('td', { class: `num ${(e?.globalDelta ?? 0) >= 0 ? 'pos' : 'neg'}`, text: e ? signed(e.globalDelta) : '-' })
-    ]);
-    table.append(tr);
-  });
-  clear(node).append(table);
+function renderTeams(panel, bundle, onSelect) {
+  clear(panel);
+  const m = bundle.meta;
+  for (const team of [1, 2]) {
+    const ps = bundle.report.players.filter((p) => p.team === team);
+    panel.append(el('div', { class: 'team-head' }, [
+      el('span', { style: `color:${teamColor(team, true)}`, text: `Team ${team} · ${m.factions?.[team] || ''}` }),
+      el('span', { class: 'muted', text: `${m.finalTickets?.[team] ?? '—'} tix · ${Math.round(bundle.report.global.teamPoints?.[team] ?? 0)} pts` })
+    ]));
+    const squads = {};
+    for (const p of ps) (squads[(bundle.players[p.eosID]?.squad) ?? 0] ??= []).push(p);
+    for (const sq of Object.keys(squads).sort((a, b) => +a - +b)) {
+      panel.append(el('div', { class: 'squad-label', text: sq === '0' ? 'Unassigned' : `Squad ${sq}` }));
+      for (const p of squads[sq].sort((a, b) => b.totalPoints - a.totalPoints)) {
+        panel.append(el('div', { class: 'sb-row', 'data-eos': p.eosID, onclick: () => onSelect(p.eosID) }, [
+          el('span', { class: 'nm', html: `<span style="color:${teamColor(team, true)}">${p.name}</span> <span class="rl">${p.pool}</span>` }),
+          el('span', { class: 'pt', text: p.totalPoints }),
+          el('span', { class: 'kd', text: `${p.stats.kills}/${p.stats.wounds}/${p.stats.deaths}` })
+        ]));
+      }
+    }
+  }
 }
 
-function buildFeed(node, bundle, onJump) {
+function renderKillFeed(node, countEl, bundle, onJump) {
   clear(node);
-  for (const ev of bundle.mapEvents) {
-    const row = el('div', { class: 'ev', 'data-tms': ev.tMs, onclick: () => onJump(ev) }, [
-      el('span', { class: `dot k-${ev.kind}` }),
-      el('span', { class: 'tm', text: fmtClock(ev.tMs) }),
-      el('span', { text: ev.label })
+  const kills = (bundle.deaths || [])
+    .filter((d) => d.killerEOSID && (d.cause === 'killed' || d.cause === 'bled out' || d.cause === 'team-killed'))
+    .slice()
+    .sort((a, b) => a.tMs - b.tMs);
+  if (countEl) countEl.textContent = String(kills.length);
+  for (const d of kills) {
+    const kc = teamColor(d.killerTeam, true), vc = teamColor(d.victimTeam, true);
+    const tag = [d.weapon, d.distanceM != null ? d.distanceM + ' m' : null, d.headshot ? 'HS' : null].filter(Boolean).join(' · ');
+    const susp = d.plausibility && d.plausibility.score < 0.5;
+    const row = el('div', { class: 'kf', 'data-tms': d.tMs, onclick: () => onJump(d) }, [
+      el('span', { class: 'kf-t', text: fmtClock(d.tMs) }),
+      el('span', { class: 'kf-line', html: `<b style="color:${kc}">${d.killerName || '?'}</b> <span class="w">${tag}${susp ? ' ⚠' : ''}</span> ▸ <b style="color:${vc}">${d.victimName}</b>` })
     ]);
-    row.style.opacity = '0.25';
+    row.style.opacity = '0.18';
     node.append(row);
+  }
+}
+
+function buildTicks(node, bundle, duration, onJump) {
+  clear(node);
+  const kinds = new Set(['kill', 'teamkill', 'flag_captured', 'fob_destroyed', 'fob_created', 'vehicle_destroyed', 'explosion']);
+  for (const ev of bundle.mapEvents) {
+    if (!kinds.has(ev.kind)) continue;
+    const left = Math.max(0, Math.min(100, (ev.tMs / duration) * 100));
+    node.append(el('div', { class: `tk-mark k-${ev.kind}`, style: `left:${left}%`, title: `${fmtClock(ev.tMs)} ${ev.label}`, onclick: () => onJump(ev) }));
   }
 }
 

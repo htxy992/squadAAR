@@ -552,13 +552,19 @@ function buildDeaths(c: DeathCtx): DeathReport[] {
       const vPos = posAt(victimEos, e.time);
       const kPos = posAt(killerEos, e.time);
       const distanceM = vPos && kPos ? Math.round(Math.hypot(vPos.x - kPos.x, vPos.y - kPos.y) / 100) : undefined;
-      const weapon = cleanWeapon(e.weapon) ?? cleanWeapon(contribsRaw[contribsRaw.length - 1]?.weapon);
-      const headshot = isBulletWeapon(weapon) && e.damage >= 95;
 
-      // match a projectile for plausibility + draw endpoints
-      const proj = c.projectiles.find(
-        (p) => p.victimEOSID === victimEos && p.shooterEOSID === killerEos && Math.abs(p.tMs - tRel) < 2500
-      );
+      // match the killing projectile (nearest in time, same shooter+victim) for
+      // plausibility, the actual weapon, and the engagement endpoints
+      let proj: ProjectileTrack | undefined;
+      let bestDt = Infinity;
+      for (const pp of c.projectiles) {
+        if (pp.victimEOSID === victimEos && pp.shooterEOSID === killerEos) {
+          const dt = Math.abs(pp.tMs - tRel);
+          if (dt < bestDt && dt < 12000) { bestDt = dt; proj = pp; }
+        }
+      }
+      const weapon = proj?.weapon ?? cleanWeapon(contribsRaw[contribsRaw.length - 1]?.weapon) ?? cleanWeapon(e.weapon);
+      const headshot = isBulletWeapon(weapon) && e.damage >= 95;
 
       // elevation + line-of-sight profile killer -> victim
       let killerElevationM: number | undefined;
@@ -696,7 +702,7 @@ function buildAnalysis(c: AnalysisCtx): RoundAnalysis {
     if (!attackerEos || attackerEos === victimEos) continue;
     // skip if an explicit projectile already covers this victim near this time
     const ex = victimEos ? explicitVictimTimes.get(victimEos) : undefined;
-    if (ex && ex.some((t) => Math.abs(t - e.time) < 2500)) continue;
+    if (ex && ex.some((t) => Math.abs(t - e.time) < 12000)) continue;
     const from = posAt(attackerEos, e.time);
     const to = posAt(victimEos, e.time);
     if (!from || !to) continue;

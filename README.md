@@ -48,7 +48,13 @@ Other scripts:
 
 ## What you get
 
-### Interactive AAR map replay
+### Interactive AAR map replay (SquadReplay-style UI)
+The replay view mirrors SquadReplay: a top bar (REPLAY · MAP/TIME/STATE · live
+ticket scoreboard · players · search · MENU/VEHICLES/SCOREBOARD), a central map,
+a left **selected-entity** detail panel, a right tabbed sidebar
+(**Kill feed** / Scoreboard / Vehicles / Analysis / Menu), and a bottom transport
+bar (play · skip · time · scrubber with event ticks · speed buttons · Exit).
+
 - **Real Squad minimaps** (like SquadCalc) — every map is calibrated to its true
   SDK world bounds, so positions overlay correctly. Drop the in-game minimap in
   via `npm run fetch:maps` (assets are OWI's, so they're fetched locally, never

@@ -188,7 +188,7 @@ export function computePoints(round: Round): RoundReport {
           r.stats.kills += 1;
           // longest kill: distance from matching projectile / positions
           const proj = round.analysis.projectiles.find(
-            (p) => p.victimEOSID === victimEos && Math.abs(p.tMs - tRel) < 2500 && p.shooterEOSID === attackerEos
+            (p) => p.victimEOSID === victimEos && Math.abs(p.tMs - tRel) < 12000 && p.shooterEOSID === attackerEos
           );
           if (proj) r.stats.longestKillM = Math.max(r.stats.longestKillM, Math.round(proj.rangeM));
         }
