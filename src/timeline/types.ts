@@ -88,6 +88,26 @@ export interface SnapshotFob {
   pos: NormPos;
 }
 
+export interface SnapshotSpawn {
+  kind: string; // HAB | Rally
+  team: number;
+  squad?: number;
+  pos: NormPos;
+}
+
+export interface SnapshotDeployable {
+  deplType: string; // HMG, Mortar, TOW, AT-gun, ...
+  team: number;
+  pos: NormPos;
+}
+
+export interface MapMarkerPoint {
+  tMs: number;
+  type: string; // enemy_infantry | enemy_vehicle | enemy_fob | ...
+  team: number;
+  pos: NormPos;
+}
+
 export interface Snapshot {
   tMs: number;
   tickets: Record<number, number>;
@@ -95,6 +115,8 @@ export interface Snapshot {
   vehicles: SnapshotVehicle[];
   flags: SnapshotFlag[];
   fobs: SnapshotFob[];
+  spawns: SnapshotSpawn[];
+  deployables: SnapshotDeployable[];
 }
 
 export type MapEventKind =
@@ -269,6 +291,7 @@ export interface Round {
   deaths: DeathReport[];
   terrain: TerrainGrid;
   vehicleTracks: VehicleTrackSummary[];
+  markers: MapMarkerPoint[];
   /** the raw normalized events, kept for the points engine + drill-down */
   events: TimelineEvent[];
 }

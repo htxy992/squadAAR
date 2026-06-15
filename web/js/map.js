@@ -30,6 +30,10 @@ export class MapRenderer {
     this._prepTerrain();
     this._prepVehicleHeat();
     this._loadMinimap();
+    // index flags in encounter order for numbered badges
+    this._flagIndex = new Map();
+    let fi = 0;
+    for (const snap of this.snaps) for (const f of snap.flags) if (!this._flagIndex.has(f.name)) this._flagIndex.set(f.name, ++fi);
     this._resize();
   }
 
@@ -217,11 +221,15 @@ export class MapRenderer {
     if (this.opts.vehHeat && this._vehHeatCanvas) { ctx.globalAlpha = 0.7; ctx.drawImage(this._vehHeatCanvas, 0, 0, S, S); ctx.globalAlpha = 1; }
     this._drawFlags(snap.flags);
     this._drawFobs(snap.fobs);
+    this._drawSpawns(snap.spawns || []);
+    this._drawDeployables(snap.deployables || []);
     if (this.opts.vehRoutes || this.routeVehicleId) this._drawVehicleRoutes();
     if (this.opts.tracers) this._drawProjectiles(timeMs);
     this._drawEventMarkers(timeMs);
     for (const v of vehicles) this._drawVehicle(v);
     for (const p of players) this._drawPlayer(p);
+    this._drawSquadBadges(players);
+    this._drawMapMarkers(timeMs);
     if (this.highlightEngagement) this._drawEngagement(this.highlightEngagement);
     this._lastPlayers = players;
     this._lastVehicles = vehicles;
@@ -260,32 +268,114 @@ export class MapRenderer {
   _drawFlags(flags) {
     const ctx = this.ctx;
     const sizeM = this.bundle.meta.sizeMeters || 3000;
-    const rpx = (100 / sizeM) * this._size; // ~100m capture radius
+    const rpx = Math.max(12, (100 / sizeM) * this._size); // ~100m capture radius
     for (const f of flags || []) {
       const x = this.px(f.pos), y = this.py(f.pos);
+      const owned = f.team === 1 || f.team === 2;
       const col = teamColor(f.team, true);
-      ctx.beginPath(); ctx.arc(x, y, Math.max(10, rpx), 0, Math.PI * 2);
-      ctx.fillStyle = hexA(col, 0.08); ctx.fill();
-      ctx.lineWidth = 2; ctx.strokeStyle = hexA(col, 0.55); ctx.stroke();
-      // progress arc
+      // influence ring
+      ctx.beginPath(); ctx.arc(x, y, rpx, 0, Math.PI * 2);
+      ctx.fillStyle = owned ? hexA(col, 0.08) : 'rgba(160,170,180,0.06)'; ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = owned ? hexA(col, 0.5) : 'rgba(160,170,180,0.4)'; ctx.stroke();
       if (f.progress > 0 && f.progress < 1) {
-        ctx.beginPath(); ctx.arc(x, y, Math.max(10, rpx), -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * f.progress);
+        ctx.beginPath(); ctx.arc(x, y, rpx, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * f.progress);
         ctx.lineWidth = 3; ctx.strokeStyle = col; ctx.stroke();
       }
+      // numbered objective badge
+      const n = this._flagIndex?.get(f.name) ?? '';
+      ctx.beginPath(); ctx.arc(x, y, 9, 0, Math.PI * 2);
+      ctx.fillStyle = owned ? col : '#3a4654'; ctx.fill();
+      ctx.lineWidth = 1.5; ctx.strokeStyle = '#0b0f14'; ctx.stroke();
+      ctx.fillStyle = '#0b0f14'; ctx.font = 'bold 11px ui-sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(String(n), x, y + 4); ctx.textAlign = 'left';
+      // name + capture bar
       ctx.fillStyle = '#cdd9e5'; ctx.font = '11px ui-sans-serif';
-      ctx.fillText(f.name.replace(/_/g, ' '), x + 8, y - 8);
+      ctx.fillText(f.name.replace(/_/g, ' '), x + 13, y - 9);
+      const bw = 34, bx = x - bw / 2, by = y + rpx + 4;
+      ctx.fillStyle = 'rgba(7,11,16,0.7)'; ctx.fillRect(bx, by, bw, 5);
+      ctx.fillStyle = col; ctx.fillRect(bx, by, bw * Math.max(0, Math.min(1, f.progress)), 5);
     }
   }
 
   _drawFobs(fobs) {
     const ctx = this.ctx;
     for (const f of fobs || []) {
-      const x = this.px(f.pos), y = this.py(f.pos), col = teamColor(f.team);
-      ctx.fillStyle = col;
-      ctx.fillRect(x - 5, y - 5, 10, 10);
-      ctx.strokeStyle = '#0b0f14'; ctx.lineWidth = 1; ctx.strokeRect(x - 5, y - 5, 10, 10);
-      ctx.fillStyle = '#0b0f14'; ctx.font = 'bold 8px ui-sans-serif';
-      ctx.fillText('F', x - 2.5, y + 3);
+      const x = this.px(f.pos), y = this.py(f.pos), col = teamColor(f.team, true);
+      // hexagon shield
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) { const a = (Math.PI / 3) * i - Math.PI / 2; const px = x + Math.cos(a) * 7, py = y + Math.sin(a) * 7; i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
+      ctx.closePath();
+      ctx.fillStyle = hexA(col, 0.92); ctx.fill();
+      ctx.strokeStyle = '#0b0f14'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.fillStyle = '#0b0f14'; ctx.font = 'bold 8px ui-sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('FOB', x, y + 3); ctx.textAlign = 'left';
+    }
+  }
+
+  _drawSpawns(spawns) {
+    const ctx = this.ctx;
+    for (const s of spawns) {
+      const x = this.px(s.pos), y = this.py(s.pos), col = teamColor(s.team, true);
+      if (/hab/i.test(s.kind)) {
+        // house glyph
+        ctx.fillStyle = hexA(col, 0.9); ctx.strokeStyle = '#0b0f14'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x - 5, y + 4); ctx.lineTo(x - 5, y - 1); ctx.lineTo(x, y - 5); ctx.lineTo(x + 5, y - 1); ctx.lineTo(x + 5, y + 4); ctx.closePath();
+        ctx.fill(); ctx.stroke();
+      } else {
+        // rally flag
+        ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(x - 3, y + 5); ctx.lineTo(x - 3, y - 5); ctx.stroke();
+        ctx.fillStyle = hexA(col, 0.9); ctx.beginPath(); ctx.moveTo(x - 3, y - 5); ctx.lineTo(x + 4, y - 3); ctx.lineTo(x - 3, y - 1); ctx.closePath(); ctx.fill();
+      }
+    }
+  }
+
+  _drawDeployables(deps) {
+    const ctx = this.ctx;
+    for (const d of deps) {
+      const x = this.px(d.pos), y = this.py(d.pos), col = teamColor(d.team, true);
+      ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#0b0f14'; ctx.fill(); ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.fillStyle = hexA(col, 0.95); ctx.font = '8px ui-sans-serif';
+      ctx.fillText(d.deplType, x + 6, y + 3);
+    }
+  }
+
+  _drawSquadBadges(players) {
+    const ctx = this.ctx;
+    const groups = new Map();
+    for (const p of players) {
+      if (p.squad == null) continue;
+      const k = p.team + ':' + p.squad;
+      const g = groups.get(k) ?? { team: p.team, squad: p.squad, xs: 0, ys: 0, n: 0 };
+      g.xs += p.pos.nx; g.ys += p.pos.ny; g.n++;
+      groups.set(k, g);
+    }
+    for (const g of groups.values()) {
+      if (g.n < 3) continue;
+      const x = (g.xs / g.n) * this._size, y = (g.ys / g.n) * this._size, col = teamColor(g.team);
+      ctx.beginPath(); ctx.arc(x, y, 8, 0, Math.PI * 2);
+      ctx.fillStyle = hexA(col, 0.85); ctx.fill();
+      ctx.strokeStyle = '#0b0f14'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 10px ui-sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(String(g.squad), x, y + 3.5); ctx.textAlign = 'left';
+    }
+  }
+
+  _drawMapMarkers(timeMs) {
+    const ctx = this.ctx;
+    const life = 120000;
+    for (const mk of this.bundle.markers || []) {
+      if (timeMs < mk.tMs || timeMs > mk.tMs + life) continue;
+      const x = this.px(mk.pos), y = this.py(mk.pos), col = teamColor(mk.team, true);
+      const a = 1 - (timeMs - mk.tMs) / life;
+      const glyph = /veh/i.test(mk.type) ? 'V' : /fob/i.test(mk.type) ? 'F' : 'I';
+      ctx.save(); ctx.translate(x, y); ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = hexA(col, 0.85 * a + 0.15); ctx.strokeStyle = '#0b0f14'; ctx.lineWidth = 1;
+      ctx.fillRect(-5, -5, 10, 10); ctx.strokeRect(-5, -5, 10, 10);
+      ctx.restore();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 8px ui-sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(glyph, x, y + 3); ctx.textAlign = 'left';
     }
   }
 

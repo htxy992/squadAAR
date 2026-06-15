@@ -3,7 +3,7 @@ import { resolveMap, worldToNorm, type MapInfo } from '../maps/mapRegistry.js';
 import { infantryPoolForRole, type Pool } from '../elo/pools.js';
 import { classifyVehicleType } from '../elo/vehicleTypes.js';
 import { buildTerrainField, terrainHeightAt, analyzeProjectile, classifyWeapon, type TerrainField } from '../analysis/ballistics.js';
-import type { ProjectileTrack, PlayerSuspicion, RoundAnalysis, DeathReport, DamageContribution, TerrainGrid, VehicleTrackSummary } from './types.js';
+import type { ProjectileTrack, PlayerSuspicion, RoundAnalysis, DeathReport, DamageContribution, TerrainGrid, VehicleTrackSummary, MapMarkerPoint } from './types.js';
 import type {
   Round,
   RoundMeta,
@@ -101,6 +101,8 @@ export function buildRound(events: TimelineEvent[], opts: BuildOptions = {}): Ro
   const teamOf = new Map<string, number>();
   const squadOf = new Map<string, number>();
   const factions: Record<number, string> = {};
+  const spawnsRaw: Array<{ kind: string; team: number; squad?: number; pos: Vec3; createdMs: number }> = [];
+  const deployRaw: Array<{ deplType: string; team: number; pos: Vec3; createdMs: number }> = [];
 
   const pushRole = (eos: string, role: string, t: number) => {
     const pool = poolForRole(role);
@@ -179,6 +181,12 @@ export function buildRound(events: TimelineEvent[], opts: BuildOptions = {}): Ro
         tickets.set(e.team, arr);
         break;
       }
+      case 'SPAWN_CREATED':
+        spawnsRaw.push({ kind: e.kind, team: e.team, squad: e.squad, pos: e.pos, createdMs: e.time });
+        break;
+      case 'DEPLOYABLE_CREATED':
+        deployRaw.push({ deplType: e.deplType, team: e.team, pos: e.pos, createdMs: e.time });
+        break;
       case 'ROUND_ENDED':
         if (e.winnerTeam && e.winnerFaction) factions[e.winnerTeam] = e.winnerFaction;
         break;
@@ -225,7 +233,7 @@ export function buildRound(events: TimelineEvent[], opts: BuildOptions = {}): Ro
   const step = Math.max(1000, Math.ceil(durationMs / MAX_FRAMES / 1000) * 1000) || 3000;
   const snapshots: Snapshot[] = [];
   for (let t = startTime; t <= endTime + 1; t += step) {
-    const snap: Snapshot = { tMs: rel(t), tickets: {}, players: [], vehicles: [], flags: [], fobs: [] };
+    const snap: Snapshot = { tMs: rel(t), tickets: {}, players: [], vehicles: [], flags: [], fobs: [], spawns: [], deployables: [] };
     for (const [team, arr] of tickets) {
       const s = sampleAt(arr, t);
       if (s) snap.tickets[team] = s.tickets;
@@ -278,6 +286,13 @@ export function buildRound(events: TimelineEvent[], opts: BuildOptions = {}): Ro
     }
     for (const [id, f] of fobs) {
       if (f.createdMs <= t && (!f.destroyedMs || f.destroyedMs > t)) snap.fobs.push({ id, team: f.team, pos: np(f.pos) });
+    }
+    for (const s of spawnsRaw) {
+      const life = /rally/i.test(s.kind) ? 240_000 : Infinity;
+      if (s.createdMs <= t && t - s.createdMs <= life) snap.spawns.push({ kind: s.kind, team: s.team, squad: s.squad, pos: np(s.pos) });
+    }
+    for (const d of deployRaw) {
+      if (d.createdMs <= t) snap.deployables.push({ deplType: d.deplType, team: d.team, pos: np(d.pos) });
     }
     snapshots.push(snap);
   }
@@ -386,6 +401,12 @@ export function buildRound(events: TimelineEvent[], opts: BuildOptions = {}): Ro
   const terrain = serializeTerrain(field);
   const vehicleTracks = computeVehicleTracks(vTracks, np, rel);
 
+  const markers: MapMarkerPoint[] = [];
+  for (const e of events) {
+    if (e.type !== 'MAP_MARKER') continue;
+    markers.push({ tMs: rel(e.time), type: e.markerType, team: teamOf.get(e.eosID) ?? 0, pos: np(e.pos) });
+  }
+
   // ---- final tickets / faction inference ----------------------------
   const finalTickets: Record<number, number> = {};
   for (const [team, arr] of tickets) finalTickets[team] = arr[arr.length - 1]?.tickets ?? 0;
@@ -410,7 +431,7 @@ export function buildRound(events: TimelineEvent[], opts: BuildOptions = {}): Ro
     source: opts.source
   };
 
-  return { meta, players, snapshots, mapEvents, analysis, deaths, terrain, vehicleTracks, events };
+  return { meta, players, snapshots, mapEvents, analysis, deaths, terrain, vehicleTracks, markers, events };
 }
 
 /* --------------------------- vehicle analytics --------------------------- */

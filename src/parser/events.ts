@@ -47,7 +47,8 @@ export type EventType =
   | 'SQUAD_CREATED'
   | 'AMMO_DELIVERY'
   | 'MAP_MARKER'
-  | 'PROJECTILE';
+  | 'PROJECTILE'
+  | 'DEPLOYABLE_CREATED';
 
 export interface BaseEvent {
   type: EventType;
@@ -302,6 +303,13 @@ export interface ProjectileEvent extends BaseEvent {
   victimEOSID?: string;
 }
 
+export interface DeployableCreatedEvent extends BaseEvent {
+  type: 'DEPLOYABLE_CREATED';
+  deplType: string;
+  team: number;
+  pos: Vec3;
+}
+
 export type TimelineEvent =
   | NewGameEvent
   | RoundEndedEvent
@@ -330,4 +338,5 @@ export type TimelineEvent =
   | SquadCreatedEvent
   | AmmoDeliveryEvent
   | MapMarkerEvent
-  | ProjectileEvent;
+  | ProjectileEvent
+  | DeployableCreatedEvent;

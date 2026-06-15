@@ -237,7 +237,12 @@ function main() {
     const sl = slOf(team, 1) ?? players.find((p) => p.team === team && p.isSL);
     const id = `BP_FOBRadius_C_${vid++}`;
     fobs.push({ id, team, x, y, createMs: atMs, creator: sl?.eos ?? '' });
-    emit(atMs, `LogSquadStats: FobCreated: fob=${id} team=${team} pos=${x.toFixed(1)},${y.toFixed(1)},${terrainZ(x, y).toFixed(1)} creator=${sl?.eos ?? '-'}`);
+    const z = terrainZ(x, y).toFixed(1);
+    emit(atMs, `LogSquadStats: FobCreated: fob=${id} team=${team} pos=${x.toFixed(1)},${y.toFixed(1)},${z} creator=${sl?.eos ?? '-'}`);
+    // HAB spawn + a couple of emplacements next to the FOB
+    emit(atMs + 50, `LogSquadStats: SpawnCreated: kind=HAB team=${team} squad=1 pos=${(x + 1500).toFixed(1)},${(y + 1500).toFixed(1)},${z}`);
+    const empl = team === 1 ? ['HMG', 'TOW'] : ['HMG', 'Kornet'];
+    empl.forEach((tp, i) => emit(atMs + 100 + i * 10, `LogSquadStats: Deployable: type=${tp} team=${team} pos=${(x + (i ? 3500 : -3500)).toFixed(1)},${(y + 2500).toFixed(1)},${z}`));
   };
   addFob(1, -90000, -90000, start + 60000);
   addFob(2, 90000, 90000, start + 60000);
@@ -337,6 +342,22 @@ function main() {
     if ((t - start) % 30000 === 0) {
       emit(t, `LogSquadStats: Tickets: team=1 tickets=${tickets[1].toFixed(0)}`);
       emit(t, `LogSquadStats: Tickets: team=2 tickets=${tickets[2].toFixed(0)}`);
+    }
+    // rally points: each SL drops one near themselves periodically
+    if ((t - start) % 90000 === 45000) {
+      for (const sl of players.filter((p) => p.isSL && p.alive)) {
+        emit(t, `LogSquadStats: SpawnCreated: kind=RallyPoint team=${sl.team} squad=${sl.squad} pos=${sl.pos.x.toFixed(1)},${sl.pos.y.toFixed(1)},${(terrainZ(sl.pos.x, sl.pos.y) + STAND).toFixed(1)}`);
+      }
+    }
+    // SLs / crews spot nearby enemies -> map markers
+    if ((t - start) % 20000 === 0) {
+      for (const sp of players.filter((p) => (p.isSL || p.vehicle) && p.alive).slice(0, 8)) {
+        const enemy = aliveEnemiesNear(sp, 80000)[0];
+        if (enemy) {
+          const type = enemy.vehicle ? 'enemy_vehicle' : 'enemy_infantry';
+          emit(t, `LogSquadStats: MapMarker: eos=${sp.eos} type=${type} pos=${enemy.pos.x.toFixed(1)},${enemy.pos.y.toFixed(1)},${(terrainZ(enemy.pos.x, enemy.pos.y) + STAND).toFixed(1)}`);
+        }
+      }
     }
 
     // combat: each tick, a handful of engagements between nearby enemies w/ LOS

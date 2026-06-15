@@ -71,7 +71,8 @@ export async function renderAAR(view, roundId) {
   ]);
   const legend = el('div', { class: 'legend' }, [
     sw('#3b82f6', 'Team 1'), sw('#ef4444', 'Team 2'), sw('#fbbf24', 'Wounded'),
-    sw('#fcd34d', 'Tracer'), sw('#f87171', 'Suspicious'), sw('#c084fc', 'FOB kill'), sw('#fb923c', 'Mortar / blast')
+    sw('#fcd34d', 'Tracer'), sw('#f87171', 'Suspicious'), sw('#c084fc', 'FOB kill'), sw('#fb923c', 'Mortar / blast'),
+    el('span', { class: 'muted', text: '◆ marker · ⬡ FOB · ⌂ HAB · ▸ rally · ① squad' })
   ]);
   const infoPanel = el('div', { class: 'panel' });
   const layersPanel = el('div', { class: 'panel' }, [el('h3', { text: 'Map layers' }), toggles, legend]);

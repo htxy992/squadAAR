@@ -13,6 +13,7 @@ export interface RoundBundle {
   deaths: Round['deaths'];
   terrain: Round['terrain'];
   vehicleTracks: Round['vehicleTracks'];
+  markers: Round['markers'];
   report: RoundReport;
   eloReport: RoundEloReport;
   balance: TeamBalance;

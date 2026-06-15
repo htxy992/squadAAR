@@ -68,6 +68,9 @@ bar (play · skip · time · scrubber with event ticks · speed buttons · Exit)
   Vehicles panel grouped by **class & type** (distance, avg/max speed, standing
   time, holds, destroyed). Click a vehicle or panel row to trace its route.
 - Scrub or play the round back (1–16×), with smooth interpolation between snapshots.
+- **OWI-style map icons** — numbered capture points with progress bars, hexagon
+  FOBs, HABs, rally points, deployables/emplacements, spotted-enemy diamond
+  markers, and squad-number badges at squad centroids.
 - **Players** coloured by team, with view-direction, wounded state, names (toggle).
 - **Vehicles** with hull HP ring, turret facing, per-component status and Elo pool.
 - **Flags** with capture radius + progress; **FOBs**; live **tickets** & clock.

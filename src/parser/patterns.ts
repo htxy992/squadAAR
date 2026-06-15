@@ -377,6 +377,11 @@ const extended: Pattern[] = [
     handle: (m, ctx) => ctx.emit({ type: 'MAP_MARKER', ...ctx.base(m), eosID: m[3], markerType: m[4], pos: vec(m[5], m[6], m[7]) })
   },
   {
+    name: 'DEPLOYABLE_CREATED',
+    regex: new RegExp(`^\\[([0-9.:-]+)]\\[([ 0-9]*)]LogSquadStats: Deployable: type=${W} team=(\\d) pos=${N},${N},${N}`),
+    handle: (m, ctx) => ctx.emit({ type: 'DEPLOYABLE_CREATED', ...ctx.base(m), deplType: m[3], team: +m[4], pos: vec(m[5], m[6], m[7]) })
+  },
+  {
     name: 'PROJECTILE',
     // LogSquadStats: Projectile: shooter=<eos> weapon=<w> from=x,y,z to=x,y,z speed=<v> hit=<0|1> victim=<eos|->
     regex: new RegExp(

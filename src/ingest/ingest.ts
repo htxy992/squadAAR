@@ -53,6 +53,7 @@ export async function ingestLogFile(file: string, store: Store, eloState: EloSta
       deaths: round.deaths,
       terrain: round.terrain,
       vehicleTracks: round.vehicleTracks,
+      markers: round.markers,
       report,
       eloReport,
       balance
