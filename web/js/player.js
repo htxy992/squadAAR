@@ -2,7 +2,7 @@ import { getJSON, el, clear, fmtDate, teamColor, signed } from './util.js';
 
 export async function renderPlayer(view, eosID) {
   clear(view).append(el('div', { class: 'loading', text: 'Loading player…' }));
-  const data = await getJSON(`/api/players/${encodeURIComponent(eosID)}`).catch(() => null);
+  const data = await getJSON(`api/players/${encodeURIComponent(eosID)}`).catch(() => null);
   if (!data || (!data.elo && !data.history.length)) { clear(view).append(el('div', { class: 'loading', text: 'Player not found.' })); return; }
   clear(view);
   const elo = data.elo;

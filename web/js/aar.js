@@ -6,7 +6,7 @@ export async function renderAAR(view, roundId) {
   view.append(el('div', { class: 'loading', text: 'Loading round…' }));
   let bundle;
   try {
-    bundle = await getJSON(`/api/rounds/${encodeURIComponent(roundId)}`);
+    bundle = await getJSON(`api/round/${encodeURIComponent(roundId)}`);
   } catch (e) {
     clear(view).append(el('div', { class: 'loading', text: 'Round not found.' }));
     return;

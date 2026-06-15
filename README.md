@@ -20,6 +20,21 @@ log file ──▶ parser ──▶ event timeline ──▶ SquadPoints ──�
 
 ---
 
+## Live demo (GitHub Pages — no server)
+
+The repo ships a GitHub Actions workflow (`.github/workflows/pages.yml`) that runs
+the whole pipeline on the bundled sample logs, **exports the API as static JSON**,
+and publishes the interactive AAR to GitHub Pages — no server or hosting needed.
+
+To enable it: repo **Settings → Pages → Source: "GitHub Actions"**, then push to
+`main`. The demo publishes at `https://<user>.github.io/<repo>/`.
+
+Build the static site locally:
+
+```bash
+npm run build:static   # -> ./dist (open via any static file server)
+```
+
 ## Quick start
 
 ```bash

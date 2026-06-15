@@ -15,6 +15,7 @@
     "fetch:maps": "tsx src/tools/fetchMaps.ts",
     "ingest": "tsx src/tools/ingestCli.ts",
     "serve": "tsx src/api/server.ts",
+    "build:static": "tsx src/tools/buildStatic.ts",
     "demo": "tsx src/tools/demo.ts",
     "test": "tsx --test tests/*.test.ts"
   },

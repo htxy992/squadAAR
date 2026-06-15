@@ -91,7 +91,7 @@ export class MapRenderer {
       const img = new Image();
       img.onload = () => { this._minimap = img; this.hasMinimap = true; };
       img.onerror = () => tryNext(i + 1);
-      img.src = `/assets/maps/${key}/${exts[i]}`;
+      img.src = `assets/maps/${key}/${exts[i]}`;
     };
     tryNext(0);
   }

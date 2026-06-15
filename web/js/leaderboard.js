@@ -2,7 +2,7 @@ import { getJSON, el, clear } from './util.js';
 
 export async function renderLeaderboard(view) {
   clear(view);
-  const pools = await getJSON('/api/pools').catch(() => ['global']);
+  const pools = await getJSON('api/pools').catch(() => ['global']);
   const sel = el('select', {}, pools.map((p) => el('option', { value: p }, p)));
   const body = el('div');
   view.append(
@@ -12,7 +12,7 @@ export async function renderLeaderboard(view) {
   );
   async function load() {
     clear(body).append(el('div', { class: 'loading', text: 'Loading…' }));
-    const { pool, rows } = await getJSON(`/api/leaderboard?pool=${encodeURIComponent(sel.value)}`);
+    const { pool, rows } = await getJSON(`api/leaderboard/${encodeURIComponent(sel.value)}`);
     clear(body);
     if (!rows.length) { body.append(el('div', { class: 'muted', text: 'No rated players yet for this pool.' })); return; }
     const table = el('table');

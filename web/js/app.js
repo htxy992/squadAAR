@@ -10,7 +10,7 @@ document.querySelector('.brand').addEventListener('click', () => (location.hash 
 async function renderRounds() {
   clear(view).append(el('h1', { class: 'page-title', text: 'Recent rounds' }));
   let rounds = [];
-  try { rounds = await getJSON('/api/rounds'); } catch {}
+  try { rounds = await getJSON('api/rounds'); } catch {}
   if (!rounds.length) {
     view.append(el('div', { class: 'panel prose', html:
       '<p>No rounds ingested yet.</p><p>Generate the bundled sample and ingest it:</p>' +
