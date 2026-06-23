@@ -1,0 +1,23 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "1.0",
+  "FriendlyName": "SquadAAR Telemetry",
+  "Description": "Server-side telemetry emitter for SquadAAR. Writes LogSquadStats: lines (player/vehicle positions, cap zones, FOBs, projectiles, roles, tickets) into SquadGame.log so the SquadAAR pipeline can build the full map replay and CQB engagement views.",
+  "Category": "Squad",
+  "CreatedBy": "SquadAAR",
+  "DocsURL": "",
+  "MarketplaceURL": "",
+  "SupportURL": "",
+  "CanContainContent": false,
+  "IsBetaVersion": false,
+  "IsExperimentalVersion": false,
+  "Installed": false,
+  "Modules": [
+    {
+      "Name": "SquadAARTelemetry",
+      "Type": "Runtime",
+      "LoadingPhase": "Default"
+    }
+  ]
+}

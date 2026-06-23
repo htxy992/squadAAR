@@ -72,6 +72,25 @@ test('parses extended telemetry lines', () => {
   assert.ok(events.some((e) => e.type === 'TICKETS'));
 });
 
+test('parses telemetry wrapped by the Blueprint logger (content-only mod route)', () => {
+  // A content-only mod can only reach the log via Unreal's Blueprint logger, so
+  // its telemetry arrives as "LogBlueprint: Warning: LogSquadStats: ...".
+  // normalizeStatsLine splices the canonical prefix back so it parses identically.
+  const lines = [
+    P(1, `LogBlueprint: Warning: LogSquadStats: PlayerPos: eos=${EOS_A} ctrl=BP_PlayerController_C_5 pos=12.0,34.0,56.0 yaw=90.0 hp=100.0 team=1 squad=2 role=USA_SL_01 state=alive`),
+    P(2, `LogBlueprint: Warning: LogSquadStats: PlayerRole: eos=${EOS_B} role=RU_Medic_01 lead=0 team=2 squad=1`)
+  ];
+  const { events } = parseLog(lines);
+  const pos = events.find((e) => e.type === 'PLAYER_POS') as any;
+  assert.ok(pos, 'wrapped PlayerPos should parse');
+  assert.equal(pos.eosID, EOS_A);
+  assert.equal(pos.team, 1);
+  assert.equal(pos.squad, 2);
+  const role = events.find((e) => e.type === 'PLAYER_ROLE') as any;
+  assert.equal(role.eosID, EOS_B);
+  assert.equal(role.team, 2);
+});
+
 test('ignores engine boot/EOS noise', () => {
   const lines = [
     'LogPakFile: Display: Mounting pak file ...',

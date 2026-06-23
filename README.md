@@ -134,8 +134,12 @@ The parser reads the **vanilla** dedicated-server lines (kills, wounds, revives,
 damage, possess, tickets, round result) that every Squad server already emits.
 For the **map replay** you additionally need position/cap/FOB/projectile
 telemetry, which vanilla logs do **not** contain — emit the extended
-`LogSquadStats:` lines from a server plugin/mod. Formats are in
-[`docs/LOG_FORMAT.md`](docs/LOG_FORMAT.md) and [`docs/CQB_CAPTURE_SPEC.md`](docs/CQB_CAPTURE_SPEC.md).
+`LogSquadStats:` lines from a server plugin/mod. The bundled
+[server-side SDK plugin](integrations/squad-sdk-plugin/) does exactly this:
+drop it into a Squad SDK build and it streams positions, vehicles, cap zones,
+FOBs and projectiles into the log (read its README for what a stock vs. modded
+server can run). Formats are in [`docs/LOG_FORMAT.md`](docs/LOG_FORMAT.md) and
+[`docs/CQB_CAPTURE_SPEC.md`](docs/CQB_CAPTURE_SPEC.md).
 
 **Same box (game server + AAR on one machine — the default).** Point the server
 at the live log and it tails + ingests rounds as they finish, while serving the

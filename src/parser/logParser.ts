@@ -11,6 +11,25 @@ export interface ParseResult {
   stats: { lines: number; matched: number; emitted: number };
 }
 
+const PREFIX_RE = /^\[[0-9.:-]+]\[[ 0-9]*]/;
+
+/**
+ * Canonical telemetry is `[ts][frame]LogSquadStats: <body>`. A C++ server module
+ * emits exactly that. A content-only (Blueprint) mod can reach the log only
+ * through Unreal's Blueprint logger, so its lines arrive wrapped, e.g.
+ * `[ts][frame]LogBlueprint: Warning: LogSquadStats: <body>`. Splice the canonical
+ * prefix back so the same patterns match either way. No-op for canonical lines
+ * (and for any line without a `LogSquadStats:` marker), so it's fully back-compatible.
+ */
+export function normalizeStatsLine(line: string): string {
+  const marker = line.indexOf('LogSquadStats:');
+  if (marker <= 0) return line;
+  const pfx = PREFIX_RE.exec(line);
+  if (!pfx) return line;
+  if (marker === pfx[0].length) return line; // already canonical
+  return pfx[0] + line.slice(marker);
+}
+
 /**
  * Parse a full Squad log (string or lines) into a flat, time-ordered list of
  * normalized timeline events. Boot/EOS/RHI spam is simply ignored — only lines
@@ -34,11 +53,19 @@ export function parseLog(input: string | string[]): ParseResult {
     })
   };
 
-  for (const line of lines) {
-    if (!line || line.length < 24) continue;
+  for (const rawLine of lines) {
+    if (!rawLine || rawLine.length < 24) continue;
     // cheap pre-filter: only lines we could possibly care about
-    if (!line.includes('LogSquad') && !line.includes('LogWorld') && !line.includes('LogNet') && !line.includes('LogGameState'))
+    if (
+      !rawLine.includes('LogSquad') &&
+      !rawLine.includes('LogWorld') &&
+      !rawLine.includes('LogNet') &&
+      !rawLine.includes('LogGameState')
+    )
       continue;
+
+    // unwrap Blueprint-logger-wrapped telemetry (see normalizeStatsLine)
+    const line = rawLine.includes('LogSquadStats:') ? normalizeStatsLine(rawLine) : rawLine;
 
     let hit = false;
     for (const p of patterns) {

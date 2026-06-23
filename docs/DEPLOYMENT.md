@@ -113,10 +113,21 @@ scoreboard and per-class Elo pools. See the vanilla note below.
 
 > **Vanilla / unlicensed server?** Squad never writes player positions to the log
 > and RCON has no position command, so map movement and CQB are impossible without
-> a licensed server-side plugin. But the **SquadJS emitter (3D)** gets you the full
-> *Vanilla + emitter* tier above. Run **either** the SquadJS emitter **or** the
-> bare `SQUAD_LOG` tail — not both, or each round ingests twice. The emitter is the
-> right choice on a vanilla server because the bare tail can't supply team/squad/role.
+> a server-side plugin running *inside* the game process. But the **SquadJS emitter**
+> gets you the full *Vanilla + emitter* tier above. Run **either** the SquadJS emitter
+> **or** the bare `SQUAD_LOG` tail — not both, or each round ingests twice. The emitter
+> is the right choice on a vanilla server because the bare tail can't supply team/squad/role.
+
+### Producing the positional / CQB tiers — the server-side SDK plugin
+
+The two top tiers need the extended `LogSquadStats:` lines, which only code running
+inside the dedicated-server process can write. The bundled
+[`integrations/squad-sdk-plugin/`](../integrations/squad-sdk-plugin/) is that code: a
+`UWorldSubsystem` that auto-runs server-side and emits player/vehicle positions, cap
+zones, FOBs and projectiles in the exact log format, with a `SQUADAAR_CQB=1` mode for
+30 Hz + look/stance (the CQB tier). Read its README first — a **stock unlicensed
+server can't load native code**, so this targets a server you build or a modded
+(Blueprint) server; on a stock server the SquadJS emitter remains the ceiling.
 
 The pipeline **degrades gracefully**: the standard map AAR is lightweight and runs
 on vanilla + positional telemetry; the CQB engagement detail only activates when
