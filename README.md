@@ -100,6 +100,14 @@ bar (play · skip · time · scrubber with event ticks · speed buttons · Exit)
   bullet path drawn over the ground between you and your killer), killing-shot
   plausibility, and the full *damage-taken-this-life* breakdown (every attacker
   who damaged you, ranked).
+- **Recoil & aim coaching (CompAAR)** — for each duel the Engagements tab draws,
+  per shooter, a **recoil plot** (every shot's drift from the first, so you see the
+  muzzle walk and spray spread) and an **aim-vs-target "sight picture"** showing
+  **where your crosshair sat relative to the enemy** at each shot (from `PlayerLook`),
+  with the systematic bias called out (e.g. *5.6° high-right*). Surfaces as the
+  `aim_off_target` / `spray_control_poor` coaching flags alongside TTK, peek, trade
+  and pre-aim analysis — the close-quarters detail competitive teams review and pub
+  players never touch.
 - Click any player/vehicle to inspect live + round stats; jump from the event feed.
 
 ### SquadPoints (chapter 3 of the spec)

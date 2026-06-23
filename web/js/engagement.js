@@ -19,6 +19,7 @@ const FLAG_META = {
   long_ttk:          { icon: '⏱', label: 'Slow TTK',             color: '#fbbf24' },
   spray_control_poor:{ icon: '💨', label: 'Poor spray control',   color: '#f87171' },
   first_shot_missed: { icon: '✗', label: 'First shot missed',     color: '#f87171' },
+  aim_off_target:    { icon: '🎯', label: 'Crosshair off target',  color: '#f87171' },
 };
 
 const OUTCOME_LABEL = {
@@ -170,6 +171,9 @@ export function renderEngagementDetail(panel, eng, bundle) {
     drawShotMap(miniCanvas, eng, allShots);
   }
 
+  // ── recoil pattern + aim-vs-target ("where you aimed / shot at") ──────────────
+  renderAimRecoil(panel, eng, nameOf, atColor, defColor);
+
   // ── coaching flags ───────────────────────────────────────────────────────────
   if ((eng.flags ?? []).length) {
     panel.append(el('div', { style: 'margin-top:10px;margin-bottom:4px;font-weight:700', text: 'Coaching flags' }));
@@ -287,6 +291,205 @@ function drawShotMap(canvas, eng, shots) {
   ctx.fillText('N↑', 4, 14);
 }
 
+// ─── recoil pattern + aim-vs-target ─────────────────────────────────────────────
+
+/**
+ * "Where you aimed / shot at" + recoil control. For each shooter in the duel
+ * (loser first — that's the coaching focus) draw two small plots:
+ *   • Recoil — each shot's angular drift from the first shot of its burst, so you
+ *     see the muzzle walk; lines connect shots within a burst.
+ *   • Aim vs target — the crosshair offset from the enemy centre at fire time
+ *     (from PlayerLook). Centre = perfectly on the enemy; rings are 1/3/5°.
+ */
+function renderAimRecoil(panel, eng, nameOf, atColor, defColor) {
+  const winner =
+    eng.outcome === 'attacker_won' ? eng.attackerEOSID :
+    eng.outcome === 'defender_won' ? eng.defenderEOSID : null;
+
+  const shooters = [
+    { eos: eng.attackerEOSID, shots: eng.attackerShots ?? [], color: atColor },
+    { eos: eng.defenderEOSID, shots: eng.defenderShots ?? [], color: defColor },
+  ].filter(s => s.shots.length);
+  if (!shooters.length) return;
+  shooters.sort((a, b) => (a.eos === winner ? 1 : 0) - (b.eos === winner ? 1 : 0)); // loser first
+
+  const anyAim = shooters.some(s => s.shots.some(b => b.aimErrorDeg != null));
+
+  panel.append(el('div', { style: 'margin-top:12px;margin-bottom:2px;font-weight:700', text: 'Recoil & aim' }));
+  panel.append(el('div', {
+    class: 'muted', style: 'font-size:11px;margin-bottom:6px',
+    text: anyAim
+      ? 'Left: recoil walk from shot 1 (lines = one burst). Right: crosshair vs. enemy — centre = on target.'
+      : 'Recoil walk from shot 1. Crosshair/aim plot needs PlayerLook telemetry.'
+  }));
+
+  for (const sh of shooters) {
+    const name = nameOf[sh.eos] ?? sh.eos.slice(0, 8);
+    const st = shooterAimStats(sh.shots);
+    const card = el('div', { style: 'border:1px solid #1f2c39;border-radius:8px;padding:8px;margin-bottom:8px' });
+
+    card.append(el('div', {
+      style: 'display:flex;justify-content:space-between;align-items:baseline;font-size:12px;margin-bottom:6px'
+    }, [
+      el('b', { style: `color:${sh.color}`, text: name }),
+      el('span', {
+        style: `font-size:11px;color:${sh.eos === winner ? '#34d399' : (winner ? '#f87171' : '#7e8ea0')}`,
+        text: sh.eos === winner ? 'won' : (winner ? 'lost' : '')
+      })
+    ]));
+
+    const recoilC = el('canvas', { width: 132, height: 132, style: 'width:100%;border-radius:6px;background:#0e141b' });
+    const aimC = el('canvas', { width: 132, height: 132, style: 'width:100%;border-radius:6px;background:#0e141b' });
+    card.append(el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, [
+      wrapPlot('Recoil (Δ from shot 1)', recoilC),
+      wrapPlot('Aim vs target', aimC)
+    ]));
+
+    const bias = biasText(st.meanH, st.meanV);
+    card.append(el('div', { class: 'statline', style: 'margin-top:6px', html:
+      `<span>Shots / hits</span><span class="num">${st.n} / ${st.hits}</span>` +
+      `<span>Vert. climb</span><span class="num">${st.climb.toFixed(1)}°</span>` +
+      `<span>Spread (RMS)</span><span class="num">${st.spread.toFixed(1)}°</span>` +
+      (st.meanErr != null
+        ? `<span>Aim error</span><span class="num">${st.meanErr.toFixed(1)}°${bias ? ' ' + bias : ''}</span>`
+        : '')
+    }));
+
+    panel.append(card);
+    drawRecoilPlot(recoilC, sh.shots, sh.color);
+    drawAimPlot(aimC, sh.shots, eng.distanceCm);
+  }
+}
+
+function wrapPlot(title, canvas) {
+  return el('div', { style: 'flex:1;min-width:118px' }, [
+    el('div', { class: 'muted', style: 'font-size:10px;margin-bottom:2px;text-align:center', text: title }),
+    canvas
+  ]);
+}
+
+function shooterAimStats(shots) {
+  const n = shots.length;
+  const hits = shots.filter(s => s.hit).length;
+  const tail = shots.filter(s => (s.burstIndex ?? 1) > 1);
+  const devs = tail.flatMap(s => [s.recoilH ?? 0, s.recoilV ?? 0]);
+  const spread = devs.length ? Math.sqrt(devs.reduce((a, v) => a + v * v, 0) / devs.length) : 0;
+  const climb = shots.reduce((m, s) => Math.max(m, s.recoilV ?? 0), 0);
+  const scored = shots.filter(s => s.aimErrorDeg != null);
+  const meanErr = scored.length ? scored.reduce((a, s) => a + s.aimErrorDeg, 0) / scored.length : null;
+  const meanH = scored.length ? scored.reduce((a, s) => a + (s.aimErrorH ?? 0), 0) / scored.length : 0;
+  const meanV = scored.length ? scored.reduce((a, s) => a + (s.aimErrorV ?? 0), 0) / scored.length : 0;
+  return { n, hits, spread, climb, meanErr, meanH, meanV, scored: scored.length };
+}
+
+/** Short human label for a systematic aim bias, e.g. "high-left". */
+function biasText(meanH, meanV) {
+  const p = [];
+  if (Math.abs(meanV) >= 1) p.push(meanV > 0 ? 'high' : 'low');
+  if (Math.abs(meanH) >= 1) p.push(meanH > 0 ? 'right' : 'left');
+  return p.join('-');
+}
+
+function drawRecoilPlot(canvas, shots, teamColor) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#0e141b'; ctx.fillRect(0, 0, W, H);
+  const cx = W / 2, cy = H / 2, pad = 16;
+
+  let maxAbs = 2; // floor so a tight pattern doesn't fill the plot
+  for (const s of shots) {
+    maxAbs = Math.max(maxAbs, Math.abs(s.recoilH ?? 0), Math.abs(s.recoilV ?? 0));
+  }
+  const scale = (Math.min(W, H) / 2 - pad) / maxAbs;
+  const pt = (s) => ({ x: cx + (s.recoilH ?? 0) * scale, y: cy - (s.recoilV ?? 0) * scale });
+
+  // degree rings
+  ctx.strokeStyle = '#16202b'; ctx.lineWidth = 1;
+  for (let d = 1; d <= maxAbs; d++) { ctx.beginPath(); ctx.arc(cx, cy, d * scale, 0, Math.PI * 2); ctx.stroke(); }
+  // axes
+  ctx.strokeStyle = '#1f2c39';
+  ctx.beginPath(); ctx.moveTo(pad, cy); ctx.lineTo(W - pad, cy); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx, pad); ctx.lineTo(cx, H - pad); ctx.stroke();
+
+  const ordered = shots.slice().sort((a, b) => a.tMs - b.tMs);
+  // connect shots within the same burst, in fire order
+  ctx.strokeStyle = teamColor; ctx.globalAlpha = 0.5; ctx.lineWidth = 1;
+  for (let i = 1; i < ordered.length; i++) {
+    if (ordered[i].burstId && ordered[i].burstId === ordered[i - 1].burstId) {
+      const a = pt(ordered[i - 1]), b = pt(ordered[i]);
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1;
+  // shot dots (first shot of a burst ringed)
+  for (const s of ordered) {
+    const p = pt(s);
+    const first = (s.burstIndex ?? 1) === 1;
+    ctx.fillStyle = s.hit ? '#34d399' : '#8a98a8';
+    ctx.beginPath(); ctx.arc(p.x, p.y, first ? 3.6 : 2.4, 0, Math.PI * 2); ctx.fill();
+    if (first) { ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 1; ctx.stroke(); }
+  }
+  // labels
+  ctx.fillStyle = '#5b6b7d'; ctx.font = '8px sans-serif';
+  ctx.textAlign = 'center'; ctx.fillText('up', cx, pad - 4); ctx.fillText('down', cx, H - 4);
+  ctx.textAlign = 'left'; ctx.fillText('L', 3, cy - 3);
+  ctx.textAlign = 'right'; ctx.fillText('R', W - 3, cy - 3);
+}
+
+function drawAimPlot(canvas, shots, distanceCm) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#0e141b'; ctx.fillRect(0, 0, W, H);
+  const cx = W / 2, cy = H / 2, pad = 16;
+
+  const scored = shots.filter(s => s.aimErrorDeg != null);
+  if (!scored.length) {
+    ctx.fillStyle = '#5b6b7d'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('no aim data', cx, cy);
+    return;
+  }
+
+  let maxAbs = 3;
+  for (const s of scored) maxAbs = Math.max(maxAbs, Math.abs(s.aimErrorH ?? 0), Math.abs(s.aimErrorV ?? 0));
+  const scale = (Math.min(W, H) / 2 - pad) / maxAbs;
+
+  // body-hit tolerance disc: angular half-width of a ~35 cm torso at this range
+  if (distanceCm > 0) {
+    const torsoDeg = Math.atan2(35, distanceCm) * (180 / Math.PI);
+    ctx.fillStyle = 'rgba(52,211,153,0.10)';
+    ctx.beginPath(); ctx.arc(cx, cy, Math.max(3, torsoDeg * scale), 0, Math.PI * 2); ctx.fill();
+  }
+  // degree rings
+  ctx.strokeStyle = '#16202b'; ctx.lineWidth = 1;
+  for (const d of [1, 3, 5]) {
+    if (d <= maxAbs * 1.15) {
+      ctx.beginPath(); ctx.arc(cx, cy, d * scale, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#3a4a5b'; ctx.font = '7px sans-serif'; ctx.textAlign = 'left';
+      ctx.fillText(d + '°', cx + d * scale + 1, cy - 2);
+    }
+  }
+  // crosshair axes
+  ctx.strokeStyle = '#1f2c39';
+  ctx.beginPath(); ctx.moveTo(pad, cy); ctx.lineTo(W - pad, cy); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx, pad); ctx.lineTo(cx, H - pad); ctx.stroke();
+  // target centre
+  ctx.fillStyle = '#f87171'; ctx.beginPath(); ctx.arc(cx, cy, 2.6, 0, Math.PI * 2); ctx.fill();
+
+  // aim points: +H = right of enemy, +V = above enemy
+  for (const s of scored) {
+    const x = cx + (s.aimErrorH ?? 0) * scale;
+    const y = cy - (s.aimErrorV ?? 0) * scale;
+    ctx.globalAlpha = s.aimFromLook ? 1 : 0.55; // fallback (projectile-derived) dimmed
+    ctx.fillStyle = s.hit ? '#34d399' : '#8a98a8';
+    ctx.beginPath(); ctx.arc(x, y, s.hit ? 3 : 2.3, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#5b6b7d'; ctx.font = '8px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('● = enemy', cx, H - 4);
+}
+
 // ─── shot timeline ────────────────────────────────────────────────────────────
 
 function renderShotTimeline(eng, nameOf, atColor, defColor) {
@@ -297,13 +500,14 @@ function renderShotTimeline(eng, nameOf, atColor, defColor) {
 
   const relMs = (tMs) => (tMs - eng.tMs);
 
+  const GRID = 'display:grid;grid-template-columns:48px 72px 54px 24px 34px 42px 46px 44px;gap:2px';
   const table = el('div', { style: 'overflow-x:auto' });
-  const tbody = el('div', { style: 'min-width:340px;font-size:11px;font-family:monospace' });
+  const tbody = el('div', { style: 'min-width:364px;font-size:11px;font-family:monospace' });
 
   // header
   tbody.append(el('div', {
-    style: 'display:grid;grid-template-columns:52px 80px 60px 30px 40px 40px 50px;gap:2px;color:#7e8ea0;padding:2px 0;border-bottom:1px solid #1f2c39;font-size:10px',
-    html: '<span>t</span><span>shooter</span><span>weapon</span><span>hit</span><span>zone</span><span>recoilH</span><span>dist</span>'
+    style: `${GRID};color:#7e8ea0;padding:2px 0;border-bottom:1px solid #1f2c39;font-size:10px`,
+    html: '<span>t</span><span>shooter</span><span>weapon</span><span>hit</span><span>zone</span><span>recoilH</span><span>aim err</span><span>dist</span>'
   }));
 
   for (const shot of allShots) {
@@ -314,10 +518,13 @@ function renderShotTimeline(eng, nameOf, atColor, defColor) {
     const zone = shot.zone ?? '—';
     const rh = shot.recoilH != null ? shot.recoilH.toFixed(1) + '°' : '—';
     const dist = shot.nearestEnemyDistCm != null ? (shot.nearestEnemyDistCm / 100).toFixed(0) + 'm' : '—';
+    const aimErr = shot.aimErrorDeg != null ? shot.aimErrorDeg.toFixed(1) + '°' : '—';
+    const aimColor = shot.aimErrorDeg == null ? '#7e8ea0'
+      : shot.aimErrorDeg < 1 ? '#34d399' : shot.aimErrorDeg < 3 ? '#fbbf24' : '#f87171';
     const hitMark = shot.hit ? '✓' : '·';
 
     tbody.append(el('div', {
-      style: `display:grid;grid-template-columns:52px 80px 60px 30px 40px 40px 50px;gap:2px;padding:2px 0;border-bottom:1px solid #0e141b;color:${shot.hit ? color : '#7e8ea0'}`,
+      style: `${GRID};padding:2px 0;border-bottom:1px solid #0e141b;color:${shot.hit ? color : '#7e8ea0'}`,
       html:
         `<span>${'+' + relMs(shot.tMs)}ms</span>` +
         `<span style="color:${color}">${name}</span>` +
@@ -325,6 +532,7 @@ function renderShotTimeline(eng, nameOf, atColor, defColor) {
         `<span style="color:${shot.hit ? '#34d399' : '#7e8ea0'}">${hitMark}</span>` +
         `<span>${zone}</span>` +
         `<span>${rh}</span>` +
+        `<span style="color:${aimColor}">${aimErr}</span>` +
         `<span style="color:${shot.onTarget ? '#fbbf24' : '#7e8ea0'}">${dist}</span>`
     }));
   }
@@ -347,3 +555,6 @@ function buildNameMap(bundle) {
   }
   return map;
 }
+
+// Internal render helpers exposed for headless test harnesses (not used by the app).
+export const __test = { drawRecoilPlot, drawAimPlot, shooterAimStats, biasText };

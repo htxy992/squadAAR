@@ -404,6 +404,14 @@ function main() {
   scriptedSuspicious(start + 11 * 60000, 1, 2, 'wallbang');
   scriptedSuspicious(start + 16 * 60000, 2, 1, 'range');
 
+  // Scripted CQB 1v1s with full aim telemetry (offset +2300 ms so the burst
+  // window never overlaps a 5 s sim tick that would clobber the duel positions).
+  cqbDuel(start + 4 * 60000 + 2300, 1, 2);
+  cqbDuel(start + 7 * 60000 + 2300, 2, 1);
+  cqbDuel(start + 12 * 60000 + 2300, 1, 2);
+  cqbDuel(start + 15 * 60000 + 2300, 2, 1);
+  cqbDuel(start + 20 * 60000 + 2300, 1, 2);
+
   // enemy FOB destruction (team1 destroys team2's forward FOB) -> tickets
   {
     const tDes = start + 14 * 60000;
@@ -553,6 +561,97 @@ function main() {
     emit(t + 5, `LogSquadStats: Projectile: shooter=${atk.eos} weapon=${atk.weapon} from=${atk.pos.x.toFixed(1)},${atk.pos.y.toFixed(1)},${fromZ.toFixed(1)} to=${vic.pos.x.toFixed(1)},${vic.pos.y.toFixed(1)},${toZ.toFixed(1)} speed=850 hit=1 victim=${vic.eos}`);
     emit(t + 20, `LogSquadTrace: [DedicatedServer]ASQSoldier::Wound(): Player:${vic.name} KillingDamage=-120.000000 from ${atk.controller} (Online IDs: EOS: ${atk.eos} steam: ${atk.steam} | Controller ID: ${atk.controller}) caused by ${atk.soldierClass}_C`);
     emit(t + 1500, `LogSquadTrace: [DedicatedServer]ASQSoldier::Die(): Player:${vic.name} KillingDamage=-120.000000 from ${atk.controller} (Online IDs: EOS: ${atk.eos} steam: ${atk.steam} | Contoller ID: ${atk.controller}) caused by ${atk.soldierClass}_C`);
+  }
+
+  // Close-quarters 1v1 with full aim telemetry (PlayerLook + PlayerState + multi-
+  // shot bursts) so the AAR's recoil / "where you aimed" analysis has data. The
+  // pusher (loser) peeks in firing first with a high-right, climbing spray; the
+  // holder (winner) is pre-aimed and tight, and wins the trade.
+  function cqbDuel(t: number, winnerTeam: number, loserTeam: number) {
+    const pick = (team: number, exclude?: Sim) => {
+      const arr = players.filter((p) => p.team === team && !p.vehicle && p !== exclude && p.role.includes('Rifleman'));
+      return arr[Math.floor(rand() * arr.length)] ?? players.find((p) => p.team === team && p !== exclude);
+    };
+    const winner = pick(winnerTeam);
+    const loser = pick(loserTeam, winner);
+    if (!winner || !loser) return;
+
+    winner.alive = loser.alive = true;
+    winner.wounded = loser.wounded = false;
+    winner.hp = loser.hp = 100;
+
+    // Winner holds an angle; loser pushes in from ~40 m down to ~25 m.
+    const base = { x: -20000 + (rand() - 0.5) * 60000, y: -20000 + (rand() - 0.5) * 60000 };
+    winner.pos = { ...base };
+    const axis = rand() < 0.5 ? { x: 1, y: 0 } : { x: 0, y: 1 };
+    const wz = terrainZ(winner.pos.x, winner.pos.y) + STAND;
+
+    const posLine = (p: Sim, z: number, state: string) =>
+      `LogSquadStats: PlayerPos: eos=${p.eos} ctrl=${p.controller} pos=${p.pos.x.toFixed(1)},${p.pos.y.toFixed(1)},${z.toFixed(1)} yaw=${p.yaw.toFixed(1)} hp=${p.hp.toFixed(1)} team=${p.team} squad=${p.squad} role=${p.role} state=${state}`;
+
+    // approach: loser advances (moving → peek), winner holds (pre-aimed, still).
+    // Samples span the full 3 s approach window the engagement heuristic looks
+    // back over (with a point just before t−3000), so attacker/defender, approach
+    // delta and moving flags are computed from the duel — never a stale sim tick.
+    const approach: Array<[number, number]> = [
+      [-3100, 4000], [-2900, 3900], [-1600, 3500], [-1100, 3200],
+      [-700, 2900], [-350, 2650], [-120, 2500], [150, 2500],
+    ]; // [dt ms, range cm] — 40 m → 25 m
+    for (const [dt, range] of approach) {
+      loser.pos = { x: base.x + axis.x * range, y: base.y + axis.y * range };
+      emit(t + dt, posLine(winner, wz, 'alive'));
+      emit(t + dt, posLine(loser, terrainZ(loser.pos.x, loser.pos.y) + STAND, 'alive'));
+    }
+    loser.pos = { x: base.x + axis.x * 2500, y: base.y + axis.y * 2500 };
+
+    emit(t - 50, `LogSquadStats: PlayerState: eos=${winner.eos} stance=crouch sprint=0`);
+    emit(t - 50, `LogSquadStats: PlayerState: eos=${loser.eos} stance=stand sprint=0`);
+
+    // burst emitter — PlayerLook + Projectile per shot. Squad convention:
+    // yaw 0 = north (+Y), CW; pitch + = up. Misses fly along the aim ray so the
+    // recoil plot shows the muzzle walk; hits are pinned to the victim.
+    const burst = (
+      sh: Sim, tg: Sim,
+      o: { shots: number; t0: number; gap: number; biasH: number; biasV: number; climb: number; jitter: number; hits: number[] }
+    ) => {
+      const eyeZ = terrainZ(sh.pos.x, sh.pos.y) + STAND + 60;
+      const tz = terrainZ(tg.pos.x, tg.pos.y) + STAND;
+      const dx = tg.pos.x - sh.pos.x, dy = tg.pos.y - sh.pos.y, dz = tz - eyeZ;
+      const R = Math.hypot(dx, dy) || 1;
+      const bearing = (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360;
+      const elev = Math.atan2(dz, R) * 180 / Math.PI;
+      sh.yaw = bearing;
+      for (let i = 0; i < o.shots; i++) {
+        const tt = o.t0 + i * o.gap;
+        const aimYaw = bearing + o.biasH + (rand() - 0.5) * o.jitter * 2;
+        const aimPitch = elev + o.biasV + o.climb * i + (rand() - 0.5) * o.jitter * 2;
+        emit(tt, `LogSquadStats: PlayerLook: eos=${sh.eos} pitch=${aimPitch.toFixed(1)} yaw=${aimYaw.toFixed(1)}`);
+        if (o.hits.includes(i)) {
+          emit(tt + 1, `LogSquad: Player:${tg.name} ActualDamage=55.000 from ${sh.name} (Online IDs: EOS: ${sh.eos} steam: ${sh.steam} | Player Controller ID: ${sh.controller})caused by ${sh.soldierClass}_C`);
+          emit(tt + 2, `LogSquadStats: Projectile: shooter=${sh.eos} weapon=${sh.weapon} from=${sh.pos.x.toFixed(1)},${sh.pos.y.toFixed(1)},${eyeZ.toFixed(1)} to=${tg.pos.x.toFixed(1)},${tg.pos.y.toFixed(1)},${tz.toFixed(1)} speed=850 hit=1 victim=${tg.eos}`);
+        } else {
+          const ay = aimYaw * Math.PI / 180, ap = aimPitch * Math.PI / 180, cp = Math.cos(ap);
+          const ex = sh.pos.x + cp * Math.sin(ay) * R;
+          const ey = sh.pos.y + cp * Math.cos(ay) * R;
+          const ez = eyeZ + Math.sin(ap) * R;
+          emit(tt + 2, `LogSquadStats: Projectile: shooter=${sh.eos} weapon=${sh.weapon} from=${sh.pos.x.toFixed(1)},${sh.pos.y.toFixed(1)},${eyeZ.toFixed(1)} to=${ex.toFixed(1)},${ey.toFixed(1)},${ez.toFixed(1)} speed=850 hit=0 victim=-`);
+        }
+      }
+    };
+
+    // loser peeks and fires first — off-target (high-right) + uncompensated climb, all miss
+    burst(loser, winner, { shots: 4, t0: t, gap: 85, biasH: 2.4, biasV: 1.6, climb: 2.0, jitter: 0.7, hits: [] });
+    // winner reacts — tight, near-centre aim, controlled climb, two hits
+    burst(winner, loser, { shots: 5, t0: t + 130, gap: 75, biasH: 0.2, biasV: 0.1, climb: 0.18, jitter: 0.3, hits: [2, 3] });
+
+    // wound on the first connecting shot, death shortly after (winner wins)
+    const woundT = t + 130 + 2 * 75;
+    emit(woundT + 4, `LogSquadTrace: [DedicatedServer]ASQSoldier::Wound(): Player:${loser.name} KillingDamage=-55.000000 from ${winner.controller} (Online IDs: EOS: ${winner.eos} steam: ${winner.steam} | Controller ID: ${winner.controller}) caused by ${winner.soldierClass}_C`);
+    loser.wounded = true; loser.hp = 0;
+    const dieT = woundT + 220;
+    emit(dieT, `LogSquadTrace: [DedicatedServer]ASQSoldier::Die(): Player:${loser.name} KillingDamage=-100.000000 from ${winner.controller} (Online IDs: EOS: ${winner.eos} steam: ${winner.steam} | Contoller ID: ${winner.controller}) caused by ${winner.soldierClass}_C`);
+    loser.alive = false; loser.wounded = false; loser.respawnAt = dieT + 20000;
+    emit(dieT + 5, posLine(loser, terrainZ(loser.pos.x, loser.pos.y) + STAND, 'dead'));
   }
 
   // ---- finalize -----------------------------------------------------------

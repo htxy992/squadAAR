@@ -88,10 +88,17 @@ Example:
 
 ### 1.3 PlayerLook (new)
 
-Per-frame crosshair direction as **pitch/yaw**. Used for spray-pattern
-reconstruction independent of `PROJECTILE` events — the delta between
-consecutive `PlayerLook` samples traces the recoil pattern even for missed
-shots where no `Projectile` to-position is available.
+Per-frame crosshair direction as **pitch/yaw**. Drives two things:
+1. **Aim-vs-target** ("where you aimed") — at each shot the crosshair is compared
+   to the bearing/elevation of the enemy, giving a per-shot **aim error** (and a
+   systematic bias like *high-right*) plus the `aim_off_target` coaching flag and
+   the engagement-detail sight-picture plot. This is the only telemetry that
+   captures *where the player aimed* as opposed to where the bullet went, so for a
+   **hit** without `PlayerLook` the aim error is left unscored (a derived ~0 would
+   be an artifact); a **miss** falls back to the projectile direction.
+2. **Spray reconstruction** independent of `PROJECTILE` events — the delta between
+   consecutive `PlayerLook` samples traces the recoil pattern even for missed
+   shots where no `Projectile` to-position is available.
 
 ```
 LogSquadStats: PlayerLook: eos=<eosID> pitch=<deg> yaw=<deg>

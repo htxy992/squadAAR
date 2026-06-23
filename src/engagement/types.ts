@@ -21,7 +21,9 @@ export type CoachingFlag =
   /** Loser's bursts had >3° RMS angular spread. */
   | 'spray_control_poor'
   /** Loser missed the first shot of >50% of their bursts. */
-  | 'first_shot_missed';
+  | 'first_shot_missed'
+  /** Loser's crosshair averaged off the enemy centre (aim-placement issue). */
+  | 'aim_off_target';
 
 // ─── per-bullet data ─────────────────────────────────────────────────────────
 
@@ -59,6 +61,22 @@ export interface BulletEvent {
   nearestEnemyDistCm?: number;
   /** true when nearestEnemyDistCm < 120 cm — bullet was aimed at someone. */
   onTarget?: boolean;
+
+  // ── aim analysis (filled by enrichWithAim, from PLAYER_LOOK) ──────────────
+  /** Crosshair yaw at fire time (deg, Squad convention: 0 = north, CW). */
+  aimYaw?: number;
+  /** Crosshair pitch at fire time (deg, + = up). */
+  aimPitch?: number;
+  /** true = aim came from real PlayerLook telemetry; false = projectile-direction fallback. */
+  aimFromLook?: boolean;
+  /** EOS ID of the target this shot's aim was scored against (victim, or nearest enemy). */
+  aimTargetEOSID?: string;
+  /** Horizontal aim error vs. target centre (deg). + = crosshair right of the enemy. */
+  aimErrorH?: number;
+  /** Vertical aim error vs. target centre (deg). + = crosshair above the enemy. */
+  aimErrorV?: number;
+  /** Total angular offset crosshair → target centre (deg). */
+  aimErrorDeg?: number;
 }
 
 // ─── burst summary ───────────────────────────────────────────────────────────

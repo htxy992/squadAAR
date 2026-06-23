@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { buildBulletEvents, detectBursts, perpDistCm } from '../src/engagement/shots.js';
 import { buildEngagements } from '../src/engagement/detect.js';
 import { PositionBuffer } from '../src/engagement/positionBuffer.js';
+import { LookBuffer, enrichWithAim, bearingDegSquad, elevationDeg, angleBetween } from '../src/engagement/aim.js';
 import type { TimelineEvent } from '../src/parser/events.js';
 import type { PositionSample } from '../src/engagement/types.js';
 import type { DeathReport, RoundPlayer } from '../src/timeline/types.js';
@@ -232,4 +233,75 @@ test('buildEngagements: engagement outcome is attacker_won when defender dies', 
   assert.ok(eng.outcome === 'attacker_won' || eng.outcome === 'defender_won', `unexpected outcome: ${eng.outcome}`);
   assert.equal(eng.killerEOSID, 'eos1');
   assert.ok(eng.ttkMs != null && eng.ttkMs >= 0);
+});
+
+// ─── aim analysis (LookBuffer + enrichWithAim) ──────────────────────────────────
+
+test('bearingDegSquad: cardinal directions (0 = north, CW)', () => {
+  assert.ok(Math.abs(bearingDegSquad(0, 100) - 0) < 1e-9, 'north');
+  assert.ok(Math.abs(bearingDegSquad(100, 0) - 90) < 1e-9, 'east');
+  assert.ok(Math.abs(bearingDegSquad(0, -100) - 180) < 1e-9, 'south');
+  assert.ok(Math.abs(bearingDegSquad(-100, 0) - 270) < 1e-9, 'west');
+});
+
+test('elevationDeg + angleBetween basics', () => {
+  assert.ok(Math.abs(elevationDeg(100, 0, 0)) < 1e-9, 'level');
+  assert.ok(Math.abs(elevationDeg(0, 0, 100) - 90) < 1e-9, 'straight up');
+  assert.ok(Math.abs(angleBetween(90, 0, 90, 0)) < 1e-9, 'identical dirs → 0');
+  assert.ok(Math.abs(angleBetween(0, 0, 90, 0) - 90) < 1e-6, 'N vs E → 90');
+});
+
+test('LookBuffer.atTime: floor within the stale window, null when too old/missing', () => {
+  const lb = new LookBuffer();
+  lb.addSorted('s', [
+    { tMs: 0, pitch: 0, yaw: 0 },
+    { tMs: 1000, pitch: 1, yaw: 10 },
+    { tMs: 2000, pitch: 2, yaw: 20 },
+  ]);
+  assert.equal(lb.atTime('s', 1200)?.yaw, 10, 'floor at 1000, 200 ms old → ok');
+  assert.equal(lb.atTime('s', 5000), null, '3 s old → stale');
+  assert.equal(lb.atTime('missing', 0), null);
+});
+
+test('enrichWithAim: PlayerLook scores the crosshair offset from the enemy', () => {
+  const bullets = buildBulletEvents([
+    makeProjectile({ time: 1000, shooterEOSID: 's', from: { x: 0, y: 0, z: 0 }, to: { x: 4000, y: 0, z: 0 }, hit: false })
+  ], 0);
+  bullets[0].nearestEnemyEOSID = 't';
+  const pos = new PositionBuffer();
+  pos.add('t', { tMs: 1000, pos: { x: 5000, y: 0, z: 0 }, yaw: 0, health: 100, team: 2, state: 'alive' });
+  const look = new LookBuffer();
+  look.add('s', { tMs: 1000, pitch: 2, yaw: 93 }); // target is due-east (90) & level (0)
+  enrichWithAim(bullets, look, pos);
+  const b = bullets[0];
+  assert.equal(b.aimFromLook, true);
+  assert.equal(b.aimTargetEOSID, 't');
+  assert.ok(Math.abs((b.aimErrorH ?? 0) - 3) < 1e-6, `aimErrorH ${b.aimErrorH} (expected +3 = right)`);
+  assert.ok(Math.abs((b.aimErrorV ?? 0) - 2) < 1e-6, `aimErrorV ${b.aimErrorV} (expected +2 = high)`);
+  assert.ok((b.aimErrorDeg ?? 0) > 3.5 && (b.aimErrorDeg ?? 0) < 3.7, `aimErrorDeg ${b.aimErrorDeg}`);
+});
+
+test('enrichWithAim: a hit without PlayerLook stays unscored (no artifact zero)', () => {
+  const bullets = buildBulletEvents([
+    makeProjectile({ time: 1000, shooterEOSID: 's', from: { x: 0, y: 0, z: 0 }, to: { x: 5000, y: 0, z: 0 }, hit: true, victimEOSID: 't' })
+  ], 0);
+  const pos = new PositionBuffer();
+  pos.add('t', { tMs: 1000, pos: { x: 5000, y: 0, z: 0 }, yaw: 0, health: 100, team: 2, state: 'alive' });
+  enrichWithAim(bullets, new LookBuffer(), pos);
+  assert.equal(bullets[0].aimErrorDeg, undefined);
+  assert.equal(bullets[0].aimFromLook, undefined);
+});
+
+test('enrichWithAim: a miss without PlayerLook falls back to the projectile direction', () => {
+  const bullets = buildBulletEvents([
+    makeProjectile({ time: 1000, shooterEOSID: 's', from: { x: 0, y: 0, z: 0 }, to: { x: 5000, y: -260, z: 0 }, hit: false })
+  ], 0);
+  bullets[0].nearestEnemyEOSID = 't';
+  const pos = new PositionBuffer();
+  pos.add('t', { tMs: 1000, pos: { x: 5000, y: 0, z: 0 }, yaw: 0, health: 100, team: 2, state: 'alive' });
+  enrichWithAim(bullets, new LookBuffer(), pos);
+  const b = bullets[0];
+  assert.equal(b.aimFromLook, false);
+  assert.ok(Math.abs(b.aimErrorH ?? 0) > 2 && Math.abs(b.aimErrorH ?? 0) < 4, `aimErrorH ${b.aimErrorH}`);
+  assert.ok((b.aimErrorDeg ?? 0) > 0, 'non-zero fallback aim error for a miss');
 });

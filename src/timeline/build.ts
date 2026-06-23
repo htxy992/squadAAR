@@ -4,6 +4,7 @@ import { infantryPoolForRole, type Pool } from '../elo/pools.js';
 import { classifyVehicleType } from '../elo/vehicleTypes.js';
 import { buildTerrainField, terrainHeightAt, analyzeProjectile, classifyWeapon, type TerrainField } from '../analysis/ballistics.js';
 import { PositionBuffer } from '../engagement/positionBuffer.js';
+import { LookBuffer, enrichWithAim } from '../engagement/aim.js';
 import { buildBulletEvents, detectBursts, enrichWithNearMiss } from '../engagement/shots.js';
 import { buildEngagements } from '../engagement/detect.js';
 import { applyCoachingFlags } from '../engagement/coaching.js';
@@ -98,6 +99,7 @@ export function buildRound(events: TimelineEvent[], opts: BuildOptions = {}): Ro
 
   // ---- tracks --------------------------------------------------------
   const pTracks = new Map<string, PSample[]>();
+  const lookTracks = new Map<string, { t: number; pitch: number; yaw: number }[]>();
   const vTracks = new Map<string, { type: string; team: number; samples: VSample[]; comp: Map<string, { t: number; health: number }[]> }>();
   const flagTracks = new Map<string, { t: number; pos: Vec3; team: number; progress: number; status: string }[]>();
   const fobs = new Map<string, { team: number; pos: Vec3; createdMs: number; destroyedMs?: number }>();
@@ -144,6 +146,12 @@ export function buildRound(events: TimelineEvent[], opts: BuildOptions = {}): Ro
         teamOf.set(e.eosID, e.team);
         if (e.squad != null) squadOf.set(e.eosID, e.squad);
         if (e.role) pushRole(e.eosID, e.role, e.time);
+        break;
+      }
+      case 'PLAYER_LOOK': {
+        const arr = lookTracks.get(e.eosID) ?? [];
+        arr.push({ t: e.time, pitch: e.pitch, yaw: e.yaw });
+        lookTracks.set(e.eosID, arr);
         break;
       }
       case 'PLAYER_ROLE':
@@ -206,6 +214,7 @@ export function buildRound(events: TimelineEvent[], opts: BuildOptions = {}): Ro
 
   // sort tracks
   for (const arr of pTracks.values()) arr.sort((a, b) => a.t - b.t);
+  for (const arr of lookTracks.values()) arr.sort((a, b) => a.t - b.t);
   for (const v of vTracks.values()) {
     v.samples.sort((a, b) => a.t - b.t);
     for (const c of v.comp.values()) c.sort((a, b) => a.t - b.t);
@@ -441,7 +450,7 @@ export function buildRound(events: TimelineEvent[], opts: BuildOptions = {}): Ro
   };
 
   // ---- CQB engagement analysis --------------------------------------
-  const { engagements, bursts } = buildCQBEngagements(events, deaths, analysis, pTracks, players, teamOf, startTime, meta.id);
+  const { engagements, bursts } = buildCQBEngagements(events, deaths, analysis, pTracks, lookTracks, players, teamOf, startTime, meta.id);
 
   return { meta, players, snapshots, mapEvents, analysis, deaths, terrain, vehicleTracks, markers, events, engagements, bursts };
 }
@@ -816,6 +825,7 @@ function buildCQBEngagements(
   deaths: DeathReport[],
   analysis: RoundAnalysis,
   pTracks: Map<string, PSample[]>,
+  lookTracks: Map<string, { t: number; pitch: number; yaw: number }[]>,
   players: Record<string, RoundPlayer>,
   teamOf: Map<string, number>,
   startTime: number,
@@ -840,9 +850,16 @@ function buildCQBEngagements(
     })));
   }
 
+  // Build the crosshair buffer from PLAYER_LOOK (drives "where you aimed" analysis)
+  const lookBuffer = new LookBuffer();
+  for (const [eosID, samples] of lookTracks) {
+    lookBuffer.addSorted(eosID, samples.map(s => ({ tMs: s.t - startTime, pitch: s.pitch, yaw: s.yaw })));
+  }
+
   const bullets = buildBulletEvents(events, startTime);
   const burstMap = detectBursts(bullets);
   enrichWithNearMiss(bullets, posBuffer, teamOf);
+  enrichWithAim(bullets, lookBuffer, posBuffer);
 
   const engagements = buildEngagements(bullets, deaths, posBuffer, players, roundId);
   applyCoachingFlags(engagements);

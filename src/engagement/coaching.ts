@@ -7,6 +7,10 @@ const POOR_SPRAY_SPREAD_DEG = 3;
 const FIRST_SHOT_MISS_RATE = 0.5;
 /** Two deaths within this angular sector (degrees) = repeated_same_angle. */
 const ANGLE_SECTOR_DEG = 30;
+/** Mean crosshair-to-target offset above this triggers aim_off_target (degrees). */
+const AIM_OFF_TARGET_DEG = 2.5;
+/** Need at least this many aim-scored shots before judging crosshair placement. */
+const MIN_AIM_SHOTS = 3;
 
 /**
  * Apply coaching flags to a list of engagements in-place.
@@ -120,6 +124,26 @@ export function applyCoachingFlags(engagements: EngagementReport[]): void {
       }
     }
 
+    // ── aim_off_target ────────────────────────────────────────────────────
+    if (loserEOS) {
+      const loserShots =
+        loserEOS === eng.attackerEOSID ? eng.attackerShots : eng.defenderShots;
+      const scored = loserShots.filter(b => b.aimErrorDeg != null);
+      if (scored.length >= MIN_AIM_SHOTS) {
+        const meanErr = scored.reduce((s, b) => s + (b.aimErrorDeg ?? 0), 0) / scored.length;
+        if (meanErr > AIM_OFF_TARGET_DEG) {
+          const meanH = scored.reduce((s, b) => s + (b.aimErrorH ?? 0), 0) / scored.length;
+          const meanV = scored.reduce((s, b) => s + (b.aimErrorV ?? 0), 0) / scored.length;
+          const dir = biasDirection(meanH, meanV);
+          flags.push('aim_off_target');
+          details.aim_off_target =
+            `Fadenkreuz im Schnitt ${meanErr.toFixed(1)}° neben dem Gegner` +
+            (dir ? ` (tendenziell ${dir})` : '') +
+            ` — Aim-Placement / Sensitivity prüfen.`;
+        }
+      }
+    }
+
     // ── repeated_same_angle ───────────────────────────────────────────────
     if (hasKill && loserEOS && eng.killerEOSID) {
       // Approximate death angle: direction from killer to victim at engagement start
@@ -152,4 +176,12 @@ function normAngle(deg: number): number {
   while (deg > 180) deg -= 360;
   while (deg < -180) deg += 360;
   return deg;
+}
+
+/** Describe a systematic aim bias from mean horizontal/vertical error (German UI). */
+function biasDirection(meanH: number, meanV: number): string {
+  const parts: string[] = [];
+  if (Math.abs(meanV) >= 1) parts.push(meanV > 0 ? 'zu hoch' : 'zu tief');
+  if (Math.abs(meanH) >= 1) parts.push(meanH > 0 ? 'zu weit rechts' : 'zu weit links');
+  return parts.join(', ');
 }
