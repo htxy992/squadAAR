@@ -65,6 +65,30 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/rounds') return sendJSON(res, 200, await store.loadIndex());
 
     if (p.startsWith('/api/round/')) {
+      // /api/round/:id/engagements[?player=<eos>]  — CQB engagement list
+      if (p.includes('/engagements')) {
+        const idPart = p.replace(/\/engagements.*$/, '').slice('/api/round/'.length);
+        const bundle = await store.loadRound(idPart);
+        if (!bundle) return sendJSON(res, 404, { error: 'round not found' });
+        const playerFilter = url.searchParams.get('player');
+        const engs = playerFilter
+          ? bundle.engagements.filter(
+              e => e.attackerEOSID === playerFilter || e.defenderEOSID === playerFilter
+            )
+          : bundle.engagements;
+        return sendJSON(res, 200, { roundId: idPart, count: engs.length, engagements: engs });
+      }
+      // /api/round/:id/bursts[?player=<eos>]  — spray/burst summaries
+      if (p.includes('/bursts')) {
+        const idPart = p.replace(/\/bursts.*$/, '').slice('/api/round/'.length);
+        const bundle = await store.loadRound(idPart);
+        if (!bundle) return sendJSON(res, 404, { error: 'round not found' });
+        const playerFilter = url.searchParams.get('player');
+        const result = playerFilter
+          ? { [playerFilter]: bundle.bursts[playerFilter] ?? [] }
+          : bundle.bursts;
+        return sendJSON(res, 200, result);
+      }
       const id = p.slice('/api/round/'.length);
       const bundle = await store.loadRound(id);
       return bundle ? sendJSON(res, 200, bundle) : sendJSON(res, 404, { error: 'round not found' });

@@ -48,7 +48,11 @@ export type EventType =
   | 'AMMO_DELIVERY'
   | 'MAP_MARKER'
   | 'PROJECTILE'
-  | 'DEPLOYABLE_CREATED';
+  | 'DEPLOYABLE_CREATED'
+  // CQB extended telemetry (mod/plugin, see docs/CQB_CAPTURE_SPEC.md)
+  | 'HIT_DETAIL'
+  | 'PLAYER_LOOK'
+  | 'PLAYER_STATE';
 
 export interface BaseEvent {
   type: EventType;
@@ -310,6 +314,40 @@ export interface DeployableCreatedEvent extends BaseEvent {
   pos: Vec3;
 }
 
+/** Hitzone per-damage event. Emitted by the CQB server plugin (see docs/CQB_CAPTURE_SPEC.md). */
+export type HitZone = 'head' | 'torso' | 'arms' | 'legs';
+
+export interface HitDetailEvent extends BaseEvent {
+  type: 'HIT_DETAIL';
+  attackerEOSID: string;
+  victimEOSID: string;
+  weapon: string;
+  damage: number;
+  zone: HitZone;
+  /** attacker world pos at moment of shot (cm) */
+  from: Vec3;
+  /** victim / impact world pos (cm) */
+  to: Vec3;
+}
+
+/** Crosshair pitch + yaw at 30 Hz (mod-based). Distinct from body yaw in PLAYER_POS. */
+export interface PlayerLookEvent extends BaseEvent {
+  type: 'PLAYER_LOOK';
+  eosID: string;
+  pitch: number; // degrees, down = negative
+  yaw: number;   // degrees, Unreal convention
+}
+
+/** Stance + sprint state at 30 Hz (mod-based). */
+export type PlayerStance = 'stand' | 'crouch' | 'prone' | 'jump';
+
+export interface PlayerStateEvent extends BaseEvent {
+  type: 'PLAYER_STATE';
+  eosID: string;
+  stance: PlayerStance;
+  sprinting: boolean;
+}
+
 export type TimelineEvent =
   | NewGameEvent
   | RoundEndedEvent
@@ -339,4 +377,7 @@ export type TimelineEvent =
   | AmmoDeliveryEvent
   | MapMarkerEvent
   | ProjectileEvent
-  | DeployableCreatedEvent;
+  | DeployableCreatedEvent
+  | HitDetailEvent
+  | PlayerLookEvent
+  | PlayerStateEvent;

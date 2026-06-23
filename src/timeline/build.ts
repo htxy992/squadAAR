@@ -3,6 +3,11 @@ import { resolveMap, worldToNorm, type MapInfo } from '../maps/mapRegistry.js';
 import { infantryPoolForRole, type Pool } from '../elo/pools.js';
 import { classifyVehicleType } from '../elo/vehicleTypes.js';
 import { buildTerrainField, terrainHeightAt, analyzeProjectile, classifyWeapon, type TerrainField } from '../analysis/ballistics.js';
+import { PositionBuffer } from '../engagement/positionBuffer.js';
+import { buildBulletEvents, detectBursts, enrichWithNearMiss } from '../engagement/shots.js';
+import { buildEngagements } from '../engagement/detect.js';
+import { applyCoachingFlags } from '../engagement/coaching.js';
+import type { EngagementReport, BurstSummary } from '../engagement/types.js';
 import type { ProjectileTrack, PlayerSuspicion, RoundAnalysis, DeathReport, DamageContribution, TerrainGrid, VehicleTrackSummary, MapMarkerPoint } from './types.js';
 import type {
   Round,
@@ -431,7 +436,10 @@ export function buildRound(events: TimelineEvent[], opts: BuildOptions = {}): Ro
     source: opts.source
   };
 
-  return { meta, players, snapshots, mapEvents, analysis, deaths, terrain, vehicleTracks, markers, events };
+  // ---- CQB engagement analysis --------------------------------------
+  const { engagements, bursts } = buildCQBEngagements(events, deaths, analysis, pTracks, players, teamOf, startTime, meta.id);
+
+  return { meta, players, snapshots, mapEvents, analysis, deaths, terrain, vehicleTracks, markers, events, engagements, bursts };
 }
 
 /* --------------------------- vehicle analytics --------------------------- */
@@ -795,4 +803,46 @@ function cleanWeapon(w?: string): string | undefined {
     .replace(/_C(_\d+)?$/, '')
     .replace(/_/g, ' ')
     .trim();
+}
+
+/* ─── CQB engagement pipeline ─────────────────────────────────────────────── */
+
+function buildCQBEngagements(
+  events: TimelineEvent[],
+  deaths: DeathReport[],
+  analysis: RoundAnalysis,
+  pTracks: Map<string, PSample[]>,
+  players: Record<string, RoundPlayer>,
+  teamOf: Map<string, number>,
+  startTime: number,
+  roundId: string
+): { engagements: EngagementReport[]; bursts: Record<string, BurstSummary[]> } {
+  // Only run if we have explicit projectile telemetry
+  const hasProjectiles = analysis.projectiles.some(p => !p.derived);
+  if (!hasProjectiles) return { engagements: [], bursts: {} };
+
+  // Build the 30 Hz position buffer from pTracks
+  const posBuffer = new PositionBuffer();
+  for (const [eosID, samples] of pTracks) {
+    posBuffer.addSorted(eosID, samples.map(s => ({
+      tMs: s.t - startTime,
+      pos: s.pos,
+      yaw: s.yaw,
+      health: s.health,
+      team: s.team,
+      state: s.state
+    })));
+  }
+
+  const bullets = buildBulletEvents(events, startTime);
+  const burstMap = detectBursts(bullets);
+  enrichWithNearMiss(bullets, posBuffer, teamOf);
+
+  const engagements = buildEngagements(bullets, deaths, posBuffer, players, roundId);
+  applyCoachingFlags(engagements);
+
+  const bursts: Record<string, BurstSummary[]> = {};
+  for (const [eosID, summaries] of burstMap) bursts[eosID] = summaries;
+
+  return { engagements, bursts };
 }

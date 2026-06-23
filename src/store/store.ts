@@ -14,6 +14,10 @@ export interface RoundBundle {
   terrain: Round['terrain'];
   vehicleTracks: Round['vehicleTracks'];
   markers: Round['markers'];
+  /** CQB 1v1 engagements with coaching flags (empty without PROJECTILE telemetry). */
+  engagements: Round['engagements'];
+  /** Per-shooter burst summaries from spray/TTK analysis. */
+  bursts: Round['bursts'];
   report: RoundReport;
   eloReport: RoundEloReport;
   balance: TeamBalance;

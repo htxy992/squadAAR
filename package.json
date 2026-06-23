@@ -17,6 +17,7 @@
     "serve": "tsx src/api/server.ts",
     "build:static": "tsx src/tools/buildStatic.ts",
     "demo": "tsx src/tools/demo.ts",
+    "ingest:geometry": "tsx src/tools/ingestGeometry.ts",
     "test": "tsx --test tests/*.test.ts"
   },
   "devDependencies": {

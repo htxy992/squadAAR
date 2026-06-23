@@ -1,4 +1,5 @@
 import type { Vec3 } from '../parser/events.js';
+import type { GeometryProvider } from '../geometry/provider.js';
 
 /**
  * Projectile detection / tracking with plausibility scoring.
@@ -146,7 +147,8 @@ export function analyzeProjectile(
   from: Vec3,
   to: Vec3,
   weapon: WeaponClassInfo,
-  samples = 24
+  samples = 24,
+  geomProvider?: GeometryProvider
 ): Plausibility {
   const dx = to.x - from.x,
     dy = to.y - from.y,
@@ -170,7 +172,10 @@ export function analyzeProjectile(
   const occlusionDepthM = Math.max(0, maxPenCm / 100);
   // direct-fire weapons require LOS; lobbed/explosive weapons don't.
   const losRequired = weapon.directFire;
-  const hasLineOfSight = !losRequired || occlusionDepthM < 1.0;
+  const terrainClear = occlusionDepthM < 1.0;
+  // building LOS: if we have SDK geometry, also check structural occlusion
+  const buildingClear = !losRequired || !geomProvider || geomProvider.segmentClear(from, to);
+  const hasLineOfSight = !losRequired || (terrainClear && buildingClear);
 
   const withinRange = rangeM <= weapon.maxRangeM;
 
@@ -179,8 +184,11 @@ export function analyzeProjectile(
 
   if (losRequired && occlusionDepthM >= 1.0) {
     flags.push(`no line-of-sight (terrain blocks shot by ~${occlusionDepthM.toFixed(0)}m)`);
-    // deeper penetration => more suspicious, saturating
     score -= Math.min(0.7, 0.25 + occlusionDepthM / 40);
+  }
+  if (losRequired && !buildingClear) {
+    flags.push('no line-of-sight (building geometry blocks shot)');
+    score -= 0.6;
   }
   if (!withinRange) {
     const over = rangeM / weapon.maxRangeM;

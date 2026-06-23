@@ -399,6 +399,52 @@ const extended: Pattern[] = [
         hit: m[12] === '1',
         victimEOSID: m[13] === '-' ? undefined : m[13]
       })
+  },
+  // ── CQB extended telemetry (see docs/CQB_CAPTURE_SPEC.md) ─────────────────
+  {
+    name: 'HIT_DETAIL',
+    // LogSquadStats: HitDetail: attacker=<eos> victim=<eos> weapon=<w> damage=<n> zone=<head|torso|arms|legs> from=x,y,z to=x,y,z
+    regex: new RegExp(
+      `^\\[([0-9.:-]+)]\\[([ 0-9]*)]LogSquadStats: HitDetail: attacker=${EOS} victim=${EOS} weapon=${W} damage=${N} zone=(\\w+) from=${N},${N},${N} to=${N},${N},${N}`
+    ),
+    handle: (m, ctx) =>
+      ctx.emit({
+        type: 'HIT_DETAIL',
+        ...ctx.base(m),
+        attackerEOSID: m[3],
+        victimEOSID: m[4],
+        weapon: m[5],
+        damage: parseFloat(m[6]),
+        zone: m[7] as any,
+        from: vec(m[8], m[9], m[10]),
+        to: vec(m[11], m[12], m[13])
+      })
+  },
+  {
+    name: 'PLAYER_LOOK',
+    // LogSquadStats: PlayerLook: eos=<eos> pitch=<n> yaw=<n>
+    regex: new RegExp(`^\\[([0-9.:-]+)]\\[([ 0-9]*)]LogSquadStats: PlayerLook: eos=${EOS} pitch=${N} yaw=${N}`),
+    handle: (m, ctx) =>
+      ctx.emit({
+        type: 'PLAYER_LOOK',
+        ...ctx.base(m),
+        eosID: m[3],
+        pitch: parseFloat(m[4]),
+        yaw: parseFloat(m[5])
+      })
+  },
+  {
+    name: 'PLAYER_STATE',
+    // LogSquadStats: PlayerState: eos=<eos> stance=<stand|crouch|prone|jump> sprint=<0|1>
+    regex: new RegExp(`^\\[([0-9.:-]+)]\\[([ 0-9]*)]LogSquadStats: PlayerState: eos=${EOS} stance=(\\w+) sprint=([01])`),
+    handle: (m, ctx) =>
+      ctx.emit({
+        type: 'PLAYER_STATE',
+        ...ctx.base(m),
+        eosID: m[3],
+        stance: m[4] as any,
+        sprinting: m[5] === '1'
+      })
   }
 ];
 

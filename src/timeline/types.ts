@@ -1,5 +1,7 @@
 import type { Pool } from '../elo/pools.js';
 import type { TimelineEvent, Vec3 } from '../parser/events.js';
+import type { EngagementReport, BurstSummary } from '../engagement/types.js';
+export type { EngagementReport, BurstSummary } from '../engagement/types.js';
 
 export interface NormPos {
   nx: number;
@@ -294,4 +296,8 @@ export interface Round {
   markers: MapMarkerPoint[];
   /** the raw normalized events, kept for the points engine + drill-down */
   events: TimelineEvent[];
+  /** CQB 1v1 engagements with coaching analysis (empty if no PROJECTILE telemetry). */
+  engagements: EngagementReport[];
+  /** Per-shooter burst summaries (key = eosID). */
+  bursts: Record<string, BurstSummary[]>;
 }

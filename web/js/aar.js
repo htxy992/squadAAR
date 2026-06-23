@@ -1,5 +1,6 @@
 import { getJSON, el, clear, fmtClock, teamColor, signed } from './util.js';
 import { MapRenderer } from './map.js';
+import { renderEngagementList, renderEngagementDetail } from './engagement.js';
 
 export async function renderAAR(view, roundId) {
   clear(view);
@@ -82,14 +83,16 @@ export async function renderAAR(view, roundId) {
   const analysisPanel = el('div', { class: 'panel tab-pane hidden' });
   const feedCount = el('span', { class: 'feed-count' });
   const feedPanel = el('div', { class: 'panel tab-pane' }, [el('div', { class: 'feed-head' }, [el('h3', { text: 'KILL FEED' }), feedCount]), el('div', { class: 'feed killfeed' })]);
+  const engListPanel = el('div', { class: 'panel tab-pane hidden' });
   const tabBtns = {
     feed: el('button', { class: 'tab active', text: 'Kill feed' }),
     score: el('button', { class: 'tab', text: 'Scoreboard' }),
     veh: el('button', { class: 'tab', text: 'Vehicles' }),
     anal: el('button', { class: 'tab', text: 'Analysis' }),
+    engs: el('button', { class: 'tab', text: 'Engagements' }),
     menu: el('button', { class: 'tab', text: 'Menu' })
   };
-  const sideRight = el('div', { class: 'side-right' }, [el('div', { class: 'tabs-row' }, Object.values(tabBtns)), feedPanel, teamsPanel, vehPanel, analysisPanel, menuPane]);
+  const sideRight = el('div', { class: 'side-right' }, [el('div', { class: 'tabs-row' }, Object.values(tabBtns)), feedPanel, teamsPanel, vehPanel, analysisPanel, engListPanel, menuPane]);
 
   // ===== bottom transport bar =====
   const playBtn = el('button', { class: 'bb-play', text: '▶' });
@@ -124,6 +127,13 @@ export async function renderAAR(view, roundId) {
   renderAnalysis(analysisPanel, bundle, jumpToProjectile);
   renderKillFeed(feedPanel.querySelector('.feed'), feedCount, bundle, onEventJump);
   buildTicks(tlTicks, bundle, duration, onEventJump);
+  renderEngagementList(engListPanel, bundle, (eng) => {
+    setTime(eng.tMs); pause();
+    r.selected = { kind: 'player', id: eng.attackerEOSID };
+    renderEngagementDetail(engagePanel, eng, bundle);
+    engagePanel.classList.remove('hidden');
+    updateSelected();
+  });
 
   // ---- playback ----------------------------------------------------------
   let currentMs = 0, playing = false, speed = 4, lastTs = 0, lastPanel = 0;
@@ -150,7 +160,7 @@ export async function renderAAR(view, roundId) {
   toggles.querySelector('#tg-follow').onchange = (e) => (r.follow = e.target.checked);
 
   // tabs + top buttons
-  const panes = { feed: feedPanel, score: teamsPanel, veh: vehPanel, anal: analysisPanel, menu: menuPane };
+  const panes = { feed: feedPanel, score: teamsPanel, veh: vehPanel, anal: analysisPanel, engs: engListPanel, menu: menuPane };
   function setTab(name) { for (const k in panes) panes[k].classList.toggle('hidden', k !== name); for (const k in tabBtns) tabBtns[k].classList.toggle('active', k === name); }
   for (const k in tabBtns) tabBtns[k].onclick = () => setTab(k);
   btnScore.onclick = () => setTab('score');
