@@ -13,6 +13,9 @@ data/index.json
 # Fetched game-map assets (OWI copyright — fetch locally via `npm run fetch:maps`)
 web/assets/maps/*/
 
+# SDK building-geometry exports (OWI-derived; produced per docs/CQB_SDK_GEOMETRY.md)
+tools/sdk/exports/
+
 # Editor / OS
 .DS_Store
 .idea/
