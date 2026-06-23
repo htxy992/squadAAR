@@ -52,7 +52,17 @@ export type EventType =
   // CQB extended telemetry (mod/plugin, see docs/CQB_CAPTURE_SPEC.md)
   | 'HIT_DETAIL'
   | 'PLAYER_LOOK'
-  | 'PLAYER_STATE';
+  | 'PLAYER_STATE'
+  // New vanilla + SquadJS events
+  | 'CHAT_MESSAGE'
+  | 'ADMIN_BROADCAST'
+  | 'PLAYER_KICK'
+  | 'PLAYER_BAN'
+  | 'SQUAD_DISBANDED'
+  | 'PLAYER_CHANGE_SQUAD'
+  | 'PLAYER_CHANGE_ROLE'
+  | 'SERVER_TICK'
+  | 'SQUAD_NAME';
 
 export interface BaseEvent {
   type: EventType;
@@ -351,6 +361,71 @@ export interface PlayerStateEvent extends BaseEvent {
   sprinting: boolean;
 }
 
+export interface ChatMessageEvent extends BaseEvent {
+  type: 'CHAT_MESSAGE';
+  channel: string;   // ChatAll | ChatTeam | ChatSquad | ChatAdmin
+  eosID?: string;
+  steamID?: string;
+  playerName: string;
+  message: string;
+}
+
+export interface AdminBroadcastEvent extends BaseEvent {
+  type: 'ADMIN_BROADCAST';
+  adminName?: string;
+  message: string;
+}
+
+export interface PlayerKickEvent extends BaseEvent {
+  type: 'PLAYER_KICK';
+  playerName: string;
+  eosID?: string;
+  steamID?: string;
+  reason: string;
+}
+
+export interface PlayerBanEvent extends BaseEvent {
+  type: 'PLAYER_BAN';
+  playerName: string;
+  eosID?: string;
+  steamID?: string;
+  reason: string;
+}
+
+export interface SquadDisbandedEvent extends BaseEvent {
+  type: 'SQUAD_DISBANDED';
+  squadID: number;
+  team: number;
+  squadName?: string;  // injected by SquadJS plugin
+}
+
+export interface PlayerChangeSquadEvent extends BaseEvent {
+  type: 'PLAYER_CHANGE_SQUAD';
+  playerName?: string;
+  eosID?: string;
+  newSquad: string;
+}
+
+export interface PlayerChangeRoleEvent extends BaseEvent {
+  type: 'PLAYER_CHANGE_ROLE';
+  playerName?: string;
+  eosID?: string;
+  newRole: string;
+}
+
+export interface ServerTickEvent extends BaseEvent {
+  type: 'SERVER_TICK';
+  fps: number;
+  windowSec: number;
+}
+
+export interface SquadNameEvent extends BaseEvent {
+  type: 'SQUAD_NAME';
+  team: number;
+  squadID: number;
+  squadName: string;
+}
+
 export type TimelineEvent =
   | NewGameEvent
   | RoundEndedEvent
@@ -383,4 +458,13 @@ export type TimelineEvent =
   | DeployableCreatedEvent
   | HitDetailEvent
   | PlayerLookEvent
-  | PlayerStateEvent;
+  | PlayerStateEvent
+  | ChatMessageEvent
+  | AdminBroadcastEvent
+  | PlayerKickEvent
+  | PlayerBanEvent
+  | SquadDisbandedEvent
+  | PlayerChangeSquadEvent
+  | PlayerChangeRoleEvent
+  | ServerTickEvent
+  | SquadNameEvent;

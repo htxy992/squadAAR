@@ -284,6 +284,38 @@ export interface VehicleTrackSummary {
   destroyedMs?: number;
 }
 
+export interface ChatEntry {
+  tMs: number;
+  channel: string;     // ChatAll | ChatTeam | ChatSquad | ChatAdmin
+  eosID?: string;
+  playerName: string;
+  message: string;
+}
+
+export interface AdminEntry {
+  tMs: number;
+  kind: 'kick' | 'ban' | 'broadcast';
+  adminName?: string;  // for broadcast
+  eosID?: string;      // for kick/ban
+  playerName?: string; // for kick/ban
+  reason?: string;     // for kick/ban
+  message?: string;    // for broadcast
+}
+
+export interface SquadChange {
+  tMs: number;
+  eosID?: string;
+  playerName?: string;
+  kind: 'squad' | 'role';
+  newVal: string;
+}
+
+export interface TickSample {
+  tMs: number;
+  fps: number;
+  windowSec: number;
+}
+
 export interface Round {
   meta: RoundMeta;
   players: Record<string, RoundPlayer>;
@@ -300,4 +332,8 @@ export interface Round {
   engagements: EngagementReport[];
   /** Per-shooter burst summaries (key = eosID). */
   bursts: Record<string, BurstSummary[]>;
+  chatLog: ChatEntry[];
+  adminLog: AdminEntry[];
+  squadChanges: SquadChange[];
+  tickSamples: TickSample[];
 }

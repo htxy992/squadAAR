@@ -233,6 +233,90 @@ const vanilla: Pattern[] = [
         healthRemaining: parseFloat(m[8])
       });
     }
+  },
+
+  // CHAT_MESSAGE — LogSquadChat lines (in vanilla log)
+  // Format: [ts][id]LogSquadChat: [ChatAll] [SteamID:12345][EOS:abcdef] Name: message
+  {
+    name: 'CHAT_MESSAGE',
+    regex: /^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadChat: \[(\w+)] \[SteamID:(\d*?)]\[EOS:([0-9a-fA-F]*?)] (.+?): (.*)/,
+    handle: (m, ctx) => ctx.emit({
+      type: 'CHAT_MESSAGE', ...ctx.base(m),
+      channel: m[3], steamID: m[4] || undefined, eosID: m[5] || undefined,
+      playerName: m[6], message: m[7]
+    })
+  },
+
+  // ADMIN_BROADCAST — admin broadcasts to server
+  // Format: [ts][id]LogSquad: Admin PlayerName (controller) has broadcast "message"
+  {
+    name: 'ADMIN_BROADCAST',
+    regex: /^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: Admin (.+?) \(.+?\) has broadcast "(.*)"/,
+    handle: (m, ctx) => ctx.emit({ type: 'ADMIN_BROADCAST', ...ctx.base(m), adminName: m[3], message: m[4] })
+  },
+
+  // PLAYER_KICK
+  // Format: [ts][id]LogSquad: Kicked player Name (Online IDs: EOS: xxx | Steam: xxx). Reason: reason
+  {
+    name: 'PLAYER_KICK',
+    regex: /^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: Kicked player (.+?) \(Online IDs:([^)]+)\)[. ]+Reason: (.*)/,
+    handle: (m, ctx) => {
+      const ids: Record<string, string> = {};
+      for (const { platform, id } of iterateIDs(m[4])) ids[platform.toLowerCase() + 'ID'] = id;
+      ctx.emit({ type: 'PLAYER_KICK', ...ctx.base(m), playerName: m[3], eosID: ids.eosID, steamID: ids.steamID, reason: m[5] });
+    }
+  },
+
+  // PLAYER_BAN
+  // Format: [ts][id]LogSquad: Banned player Name (Online IDs: ...). Reason: reason
+  {
+    name: 'PLAYER_BAN',
+    regex: /^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: Banned player (.+?) \(Online IDs:([^)]+)\)[. ]+Reason: (.*)/,
+    handle: (m, ctx) => {
+      const ids: Record<string, string> = {};
+      for (const { platform, id } of iterateIDs(m[4])) ids[platform.toLowerCase() + 'ID'] = id;
+      ctx.emit({ type: 'PLAYER_BAN', ...ctx.base(m), playerName: m[3], eosID: ids.eosID, steamID: ids.steamID, reason: m[5] });
+    }
+  },
+
+  // SQUAD_DISBANDED
+  // Format: [ts][id]LogSquad: SquadID: 3 Team: 1 has been disbanded
+  {
+    name: 'SQUAD_DISBANDED',
+    regex: /^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: SquadID: (\d+) Team: (\d+) has been disbanded/,
+    handle: (m, ctx) => ctx.emit({ type: 'SQUAD_DISBANDED', ...ctx.base(m), squadID: +m[3], team: +m[4] })
+  },
+
+  // PLAYER_CHANGE_SQUAD — player switches squad mid-round
+  // Format: [ts][id]LogSquad: Player: Name (Online IDs: ...) has changed squad to SquadName
+  {
+    name: 'PLAYER_CHANGE_SQUAD',
+    regex: /^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: Player: (.+) \(Online IDs:([^)]+)\) has changed squad to (\S+)/,
+    handle: (m, ctx) => {
+      const ids: Record<string, string> = {};
+      for (const { platform, id } of iterateIDs(m[4])) ids[platform.toLowerCase() + 'ID'] = id;
+      ctx.emit({ type: 'PLAYER_CHANGE_SQUAD', ...ctx.base(m), playerName: m[3], eosID: ids.eosID, newSquad: m[5] });
+    }
+  },
+
+  // PLAYER_CHANGE_ROLE — player selects a new kit/role
+  // Format: [ts][id]LogSquad: Player: Name (Online IDs: ...) has selected role RoleClassname
+  {
+    name: 'PLAYER_CHANGE_ROLE',
+    regex: /^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: Player: (.+) \(Online IDs:([^)]+)\) has selected role (\S+)/,
+    handle: (m, ctx) => {
+      const ids: Record<string, string> = {};
+      for (const { platform, id } of iterateIDs(m[4])) ids[platform.toLowerCase() + 'ID'] = id;
+      ctx.emit({ type: 'PLAYER_CHANGE_ROLE', ...ctx.base(m), playerName: m[3], eosID: ids.eosID, newRole: m[5] });
+    }
+  },
+
+  // SERVER_TICK — server performance (logged every ~60s)
+  // Format: [ts][id]LogSquad: Average Server FPS: 50.00 over last 60.00 seconds
+  {
+    name: 'SERVER_TICK',
+    regex: /^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: Average Server FPS: ([0-9.]+) over last ([0-9.]+) seconds/,
+    handle: (m, ctx) => ctx.emit({ type: 'SERVER_TICK', ...ctx.base(m), fps: parseFloat(m[3]), windowSec: parseFloat(m[4]) })
   }
 ];
 
@@ -460,6 +544,19 @@ const extended: Pattern[] = [
         stance: m[4] as any,
         sprinting: m[5] === '1'
       })
+  },
+  // ── SquadJS-injected squad name / disbanded (LogSquadStats lines) ──────────
+  {
+    name: 'SQUAD_DISBANDED_EXT',
+    // LogSquadStats: SquadDisbanded: team=1 squad=3 name=Alpha
+    regex: new RegExp(`^\\[([0-9.:-]+)]\\[([ 0-9]*)]LogSquadStats: SquadDisbanded: team=(\\d) squad=(\\d+) name=${W}`),
+    handle: (m, ctx) => ctx.emit({ type: 'SQUAD_DISBANDED', ...ctx.base(m), team: +m[3], squadID: +m[4], squadName: m[5] })
+  },
+  {
+    name: 'SQUAD_NAME',
+    // LogSquadStats: SquadName: team=1 squad=3 name=Alpha_Squad
+    regex: new RegExp(`^\\[([0-9.:-]+)]\\[([ 0-9]*)]LogSquadStats: SquadName: team=(\\d) squad=(\\d+) name=${W}`),
+    handle: (m, ctx) => ctx.emit({ type: 'SQUAD_NAME', ...ctx.base(m), team: +m[3], squadID: +m[4], squadName: m[5].replace(/_/g, ' ') })
   }
 ];
 

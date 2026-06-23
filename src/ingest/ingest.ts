@@ -27,8 +27,7 @@ const MIN_ACTIVITY = 20;
 
 /**
  * Build, score and persist one round chunk. Returns the summary, or `null` if
- * the chunk is just a map-load with no real gameplay telemetry (client logs,
- * seeding, transitions). Mutates `eloState` in place.
+ * the chunk is just a map-load with no real gameplay telemetry. Mutates `eloState` in place.
  */
 export async function ingestRoundChunk(
   chunk: TimelineEvent[],
@@ -36,14 +35,11 @@ export async function ingestRoundChunk(
   store: Store,
   eloState: EloState
 ): Promise<IngestedRound | null> {
-  // a real round needs actual gameplay telemetry, not just a map-load line
-  // (client logs contain NEW_GAME but none of the combat/position events).
   const activity = chunk.filter(
     (e) => e.type === 'PLAYER_POS' || e.type === 'PLAYER_DIED' || e.type === 'TICKETS' || e.type === 'PLAYER_WOUNDED'
   ).length;
   if (activity < MIN_ACTIVITY) return null;
 
-  // use a real DEM (heightmap PNG) for terrain/LOS if one exists for this map
   const newGame = chunk.find((e) => e.type === 'NEW_GAME') as any;
   const map = resolveMap(newGame?.layerClassname ?? newGame?.mapClassname);
   const terrainField = tryLoadHeightmapField(map) ?? undefined;
@@ -65,6 +61,10 @@ export async function ingestRoundChunk(
     markers: round.markers,
     engagements: round.engagements,
     bursts: round.bursts,
+    chatLog: round.chatLog,
+    adminLog: round.adminLog,
+    squadChanges: round.squadChanges,
+    tickSamples: round.tickSamples,
     report,
     eloReport,
     balance
@@ -80,20 +80,12 @@ export async function ingestRoundChunk(
 }
 
 export interface IngestTextOptions {
-  /**
-   * Only ingest rounds that actually ended (contain a ROUND_ENDED event).
-   * Used by the push endpoint / live tail so an in-progress round at the tail of
-   * a payload is ignored until it finishes — and so SquadElo isn't applied to a
-   * partial round and then again to the complete one.
-   */
   completeOnly?: boolean;
 }
 
 /**
  * Parse a block of raw log text, split it into rounds, and persist every
- * qualifying round. This is the shared core behind the ingest CLI, the HTTP
- * push endpoint, and the live watcher. Mutates `eloState` in place; the caller
- * is responsible for persisting it once the batch is done.
+ * qualifying round. Mutates `eloState` in place.
  */
 export async function ingestText(
   text: string,

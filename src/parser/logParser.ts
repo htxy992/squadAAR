@@ -8,6 +8,8 @@ export interface ParseResult {
   store: EventStore;
   /** lines that matched no pattern (sampled, for diagnostics) */
   unmatchedSample: string[];
+  /** unmatched LogSquad/LogSquadTrace lines (sampled up to 200, for reverse-engineering new patterns) */
+  unmatchedLogSquad: string[];
   stats: { lines: number; matched: number; emitted: number };
 }
 
@@ -40,6 +42,7 @@ export function parseLog(input: string | string[]): ParseResult {
   const store = newEventStore();
   const events: TimelineEvent[] = [];
   const unmatchedSample: string[] = [];
+  const unmatchedLogSquad: string[] = [];
   let matched = 0;
 
   const ctx: ParserContext = {
@@ -82,12 +85,13 @@ export function parseLog(input: string | string[]): ParseResult {
       }
     }
     if (!hit && line.includes('LogSquadStats') && unmatchedSample.length < 50) unmatchedSample.push(line);
+    if (!hit && (line.includes('LogSquad:') || line.includes('LogSquadTrace:') || line.includes('LogSquadChat:')) && !line.includes('LogSquadStats') && unmatchedLogSquad.length < 200) unmatchedLogSquad.push(line);
   }
 
   // stable sort by time then chainID (events already mostly ordered)
   events.sort((a, b) => a.time - b.time || a.chainID - b.chainID);
 
-  return { events, store, unmatchedSample, stats: { lines: lines.length, matched, emitted: events.length } };
+  return { events, store, unmatchedSample, unmatchedLogSquad, stats: { lines: lines.length, matched, emitted: events.length } };
 }
 
 /**

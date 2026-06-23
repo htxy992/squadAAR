@@ -166,6 +166,26 @@ export default class SquadAAR extends BasePlugin {
       added++;
     }
     if (added) this.verbose(2, `SquadAAR: roster snapshot — ${added} player role line(s)`);
+    this.snapshotSquads();
+  }
+
+  /**
+   * Inject a `LogSquadStats: SquadName` line for each known squad so the
+   * parser can build a squadID → name mapping without relying on SquadCreated
+   * events (which are only emitted by extended telemetry plugins).
+   */
+  snapshotSquads() {
+    if (!this.curHasStart || this.curEnded) return;
+    const squads = this.server && Array.isArray(this.server.squads) ? this.server.squads : [];
+    if (!squads.length) return;
+    const ts = `[${SquadAAR.stamp()}][ 0]`;
+    for (const sq of squads) {
+      const team = Number(sq.teamID);
+      const squadID = Number(sq.squadID);
+      const name = sq.squadName || sq.name;
+      if (!name || !Number.isFinite(squadID)) continue;
+      this.cur.push(`${ts}LogSquadStats: SquadName: team=${team} squad=${squadID} name=${name.replace(/\s+/g, '_')}`);
+    }
   }
 
   async ship(lines) {

@@ -18,6 +18,10 @@ export interface RoundBundle {
   engagements: Round['engagements'];
   /** Per-shooter burst summaries from spray/TTK analysis. */
   bursts: Round['bursts'];
+  chatLog: Round['chatLog'];
+  adminLog: Round['adminLog'];
+  squadChanges: Round['squadChanges'];
+  tickSamples: Round['tickSamples'];
   report: RoundReport;
   eloReport: RoundEloReport;
   balance: TeamBalance;
