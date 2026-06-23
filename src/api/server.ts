@@ -8,6 +8,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { Store } from '../store/store.js';
 import { ingestText, type IngestedRound } from '../ingest/ingest.js';
+import { LogWatcher } from '../ingest/watcher.js';
 import { leaderboard, playerProfile, poolsList } from './queries.js';
 
 const PORT = Number(process.env.PORT ?? 8787);
@@ -17,15 +18,19 @@ const store = new Store();
 
 /**
  * Serialize ingests so concurrent pushes can't race on the shared Elo state.
+ * Each job loads the latest Elo state, applies the round(s), and persists it.
  */
 let ingestChain: Promise<unknown> = Promise.resolve();
 function runIngest(text: string, source: string): Promise<IngestedRound[]> {
   const job = ingestChain.then(async () => {
     const eloState = await store.loadEloState();
+    // Only ingest finished rounds — a partial round at the tail of a push (or
+    // mid-round tail read) waits until it completes.
     const rounds = await ingestText(text, source, store, eloState, { completeOnly: true });
     if (rounds.length) await store.saveEloState(eloState);
     return rounds;
   });
+  // keep the chain alive even if a job rejects
   ingestChain = job.catch(() => undefined);
   return job;
 }
@@ -97,7 +102,7 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
     const p = url.pathname;
 
-    // CORS preflight
+    // CORS preflight (lets a remote server / browser push logs cross-origin)
     if (req.method === 'OPTIONS') {
       res.writeHead(204, {
         'access-control-allow-origin': '*',
@@ -107,7 +112,9 @@ const server = http.createServer(async (req, res) => {
       return res.end();
     }
 
-    // POST /api/ingest — push raw log text
+    // POST /api/ingest  — push raw log text (or JSON {text, source}); ingests
+    // any complete rounds it contains. Used by the SquadJS plugin, remote
+    // shippers, and the web drag-drop uploader.
     if (req.method === 'POST' && p === '/api/ingest') {
       let body: string;
       try {
@@ -139,6 +146,30 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/rounds') return sendJSON(res, 200, await store.loadIndex());
 
     if (p.startsWith('/api/round/')) {
+      // /api/round/:id/engagements[?player=<eos>]  — CQB engagement list
+      if (p.includes('/engagements')) {
+        const idPart = p.replace(/\/engagements.*$/, '').slice('/api/round/'.length);
+        const bundle = await store.loadRound(idPart);
+        if (!bundle) return sendJSON(res, 404, { error: 'round not found' });
+        const playerFilter = url.searchParams.get('player');
+        const engs = playerFilter
+          ? bundle.engagements.filter(
+              e => e.attackerEOSID === playerFilter || e.defenderEOSID === playerFilter
+            )
+          : bundle.engagements;
+        return sendJSON(res, 200, { roundId: idPart, count: engs.length, engagements: engs });
+      }
+      // /api/round/:id/bursts[?player=<eos>]  — spray/burst summaries
+      if (p.includes('/bursts')) {
+        const idPart = p.replace(/\/bursts.*$/, '').slice('/api/round/'.length);
+        const bundle = await store.loadRound(idPart);
+        if (!bundle) return sendJSON(res, 404, { error: 'round not found' });
+        const playerFilter = url.searchParams.get('player');
+        const result = playerFilter
+          ? { [playerFilter]: bundle.bursts[playerFilter] ?? [] }
+          : bundle.bursts;
+        return sendJSON(res, 200, result);
+      }
       // /api/round/:id/chat  — chat log
       if (p.includes('/chat')) {
         const idPart = p.replace(/\/chat.*$/, '').slice('/api/round/'.length);
@@ -187,8 +218,23 @@ const server = http.createServer(async (req, res) => {
 });
 
 await store.init();
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   console.log(`SquadAAR server on http://localhost:${PORT}`);
   console.log(`  API: /api/rounds  /api/round/:id  /api/leaderboard?pool=  /api/players/:eosID`);
   console.log(`  POST /api/ingest  (push raw log text; drag-drop in the web UI)`);
+
+  // Same-box deployment: point SQUAD_LOG at the server's live log and this
+  // process both serves the AAR and ingests rounds as they finish. Rounds are
+  // routed through the same serialized ingest as HTTP pushes (no Elo races).
+  const liveLog = process.env.SQUAD_LOG;
+  if (liveLog) {
+    const watcher = new LogWatcher(liveLog, store, {
+      fromStart: process.env.SQUAD_LOG_FROM_START === '1',
+      pollMs: process.env.SQUAD_LOG_POLL ? Number(process.env.SQUAD_LOG_POLL) : undefined,
+      ingest: runIngest,
+      onInfo: (m) => console.log(`  [watch] ${m}`),
+      onRound: (r) => console.log(`  [watch] ingested ${r.id} players=${r.players} suspicious=${r.suspicious}`)
+    });
+    await watcher.start();
+  }
 });

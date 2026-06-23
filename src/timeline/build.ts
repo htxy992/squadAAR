@@ -3,6 +3,12 @@ import { resolveMap, worldToNorm, type MapInfo } from '../maps/mapRegistry.js';
 import { infantryPoolForRole, type Pool } from '../elo/pools.js';
 import { classifyVehicleType } from '../elo/vehicleTypes.js';
 import { buildTerrainField, terrainHeightAt, analyzeProjectile, classifyWeapon, type TerrainField } from '../analysis/ballistics.js';
+import { PositionBuffer } from '../engagement/positionBuffer.js';
+import { LookBuffer, enrichWithAim } from '../engagement/aim.js';
+import { buildBulletEvents, detectBursts, enrichWithNearMiss } from '../engagement/shots.js';
+import { buildEngagements } from '../engagement/detect.js';
+import { applyCoachingFlags } from '../engagement/coaching.js';
+import type { EngagementReport, BurstSummary } from '../engagement/types.js';
 import type { ProjectileTrack, PlayerSuspicion, RoundAnalysis, DeathReport, DamageContribution, TerrainGrid, VehicleTrackSummary, MapMarkerPoint } from './types.js';
 import type {
   Round,
@@ -97,6 +103,7 @@ export function buildRound(events: TimelineEvent[], opts: BuildOptions = {}): Ro
 
   // ---- tracks --------------------------------------------------------
   const pTracks = new Map<string, PSample[]>();
+  const lookTracks = new Map<string, { t: number; pitch: number; yaw: number }[]>();
   const vTracks = new Map<string, { type: string; team: number; samples: VSample[]; comp: Map<string, { t: number; health: number }[]> }>();
   const flagTracks = new Map<string, { t: number; pos: Vec3; team: number; progress: number; status: string }[]>();
   const fobs = new Map<string, { team: number; pos: Vec3; createdMs: number; destroyedMs?: number }>();
@@ -147,6 +154,12 @@ export function buildRound(events: TimelineEvent[], opts: BuildOptions = {}): Ro
         teamOf.set(e.eosID, e.team);
         if (e.squad != null) squadOf.set(e.eosID, e.squad);
         if (e.role) pushRole(e.eosID, e.role, e.time);
+        break;
+      }
+      case 'PLAYER_LOOK': {
+        const arr = lookTracks.get(e.eosID) ?? [];
+        arr.push({ t: e.time, pitch: e.pitch, yaw: e.yaw });
+        lookTracks.set(e.eosID, arr);
         break;
       }
       case 'PLAYER_ROLE':
@@ -230,6 +243,7 @@ export function buildRound(events: TimelineEvent[], opts: BuildOptions = {}): Ro
 
   // sort tracks
   for (const arr of pTracks.values()) arr.sort((a, b) => a.t - b.t);
+  for (const arr of lookTracks.values()) arr.sort((a, b) => a.t - b.t);
   for (const v of vTracks.values()) {
     v.samples.sort((a, b) => a.t - b.t);
     for (const c of v.comp.values()) c.sort((a, b) => a.t - b.t);
@@ -464,7 +478,10 @@ export function buildRound(events: TimelineEvent[], opts: BuildOptions = {}): Ro
     source: opts.source
   };
 
-  return { meta, players, snapshots, mapEvents, analysis, deaths, terrain, vehicleTracks, markers, events, engagements: [], bursts: {}, chatLog, adminLog, squadChanges, tickSamples };
+  // ---- CQB engagement analysis --------------------------------------
+  const { engagements, bursts } = buildCQBEngagements(events, deaths, analysis, pTracks, lookTracks, players, teamOf, startTime, meta.id);
+
+  return { meta, players, snapshots, mapEvents, analysis, deaths, terrain, vehicleTracks, markers, events, engagements, bursts, chatLog, adminLog, squadChanges, tickSamples };
 }
 
 /* --------------------------- vehicle analytics --------------------------- */
@@ -828,4 +845,56 @@ function cleanWeapon(w?: string): string | undefined {
     .replace(/_C(_\d+)?$/, '')
     .replace(/_/g, ' ')
     .trim();
+}
+
+/* ─── CQB engagement pipeline ─────────────────────────────────────────────── */
+
+function buildCQBEngagements(
+  events: TimelineEvent[],
+  deaths: DeathReport[],
+  analysis: RoundAnalysis,
+  pTracks: Map<string, PSample[]>,
+  lookTracks: Map<string, { t: number; pitch: number; yaw: number }[]>,
+  players: Record<string, RoundPlayer>,
+  teamOf: Map<string, number>,
+  startTime: number,
+  roundId: string
+): { engagements: EngagementReport[]; bursts: Record<string, BurstSummary[]> } {
+  // Only run if we have explicit direct-fire projectile telemetry (not mortars/explosives)
+  const hasProjectiles = analysis.projectiles.some(
+    p => !p.derived && p.weaponFamily !== 'explosive' && p.weaponFamily !== 'grenade'
+  );
+  if (!hasProjectiles) return { engagements: [], bursts: {} };
+
+  // Build the 30 Hz position buffer from pTracks
+  const posBuffer = new PositionBuffer();
+  for (const [eosID, samples] of pTracks) {
+    posBuffer.addSorted(eosID, samples.map(s => ({
+      tMs: s.t - startTime,
+      pos: s.pos,
+      yaw: s.yaw,
+      health: s.health,
+      team: s.team,
+      state: s.state
+    })));
+  }
+
+  // Build the crosshair buffer from PLAYER_LOOK (drives "where you aimed" analysis)
+  const lookBuffer = new LookBuffer();
+  for (const [eosID, samples] of lookTracks) {
+    lookBuffer.addSorted(eosID, samples.map(s => ({ tMs: s.t - startTime, pitch: s.pitch, yaw: s.yaw })));
+  }
+
+  const bullets = buildBulletEvents(events, startTime);
+  const burstMap = detectBursts(bullets);
+  enrichWithNearMiss(bullets, posBuffer, teamOf);
+  enrichWithAim(bullets, lookBuffer, posBuffer);
+
+  const engagements = buildEngagements(bullets, deaths, posBuffer, players, roundId);
+  applyCoachingFlags(engagements);
+
+  const bursts: Record<string, BurstSummary[]> = {};
+  for (const [eosID, summaries] of burstMap) bursts[eosID] = summaries;
+
+  return { engagements, bursts };
 }
