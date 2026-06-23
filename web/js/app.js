@@ -9,13 +9,15 @@ document.querySelector('.brand').addEventListener('click', () => (location.hash 
 
 async function renderRounds() {
   clear(view).append(el('h1', { class: 'page-title', text: 'Recent rounds' }));
+  view.append(renderUploader());
   let rounds = [];
   try { rounds = await getJSON('api/rounds'); } catch {}
   if (!rounds.length) {
     view.append(el('div', { class: 'panel prose', html:
-      '<p>No rounds ingested yet.</p><p>Generate the bundled sample and ingest it:</p>' +
-      '<pre class="mono">npm run demo</pre><p>…or ingest a real server log:</p>' +
-      '<pre class="mono">npm run ingest -- /path/to/SquadGame.log</pre>' }));
+      '<p>No rounds ingested yet.</p><p>Drop a <code>SquadGame.log</code> above, or from the CLI:</p>' +
+      '<pre class="mono">npm run demo                        # bundled synthetic round\n' +
+      'npm run ingest -- /path/to/SquadGame.log   # one-shot ingest\n' +
+      'npm run watch  -- /path/to/SquadGame.log   # live-tail a running server</pre>' }));
     return;
   }
   const grid = el('div', { class: 'rounds-grid' });
@@ -30,6 +32,50 @@ async function renderRounds() {
     ]));
   }
   view.append(grid);
+}
+
+/** Drag-drop / file-picker uploader that POSTs a log to /api/ingest. */
+function renderUploader() {
+  const status = el('span', { class: 'muted', text: 'Drop a SquadGame.log here, or click to choose' });
+  const input = el('input', { type: 'file', accept: '.log,.txt,text/plain', style: 'display:none' });
+  const zone = el('div', { class: 'uploader' }, [
+    el('span', { class: 'up-icon', text: '⬆' }), status, input
+  ]);
+
+  async function send(file) {
+    if (!file) return;
+    status.textContent = `Ingesting ${file.name} (${(file.size / 1048576).toFixed(1)} MB)…`;
+    zone.classList.add('busy');
+    try {
+      const text = await file.text();
+      const r = await fetch('api/ingest', {
+        method: 'POST',
+        headers: { 'content-type': 'text/plain', 'x-source': file.name },
+        body: text
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || r.status);
+      status.textContent = j.ingested
+        ? `Ingested ${j.ingested} round(s). Refreshing…`
+        : 'No complete rounds found in that file.';
+      if (j.ingested) setTimeout(renderRounds, 600);
+    } catch (e) {
+      status.textContent = 'Upload failed: ' + e.message;
+    } finally {
+      zone.classList.remove('busy');
+    }
+  }
+
+  zone.addEventListener('click', () => input.click());
+  input.addEventListener('change', () => send(input.files[0]));
+  zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('drag'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
+  zone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    zone.classList.remove('drag');
+    send(e.dataTransfer.files[0]);
+  });
+  return zone;
 }
 
 function renderAbout() {

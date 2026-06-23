@@ -30,15 +30,28 @@ additional events add the flesh for 1v1 / close-quarters coaching analysis.
 
 ### 1.1 PlayerPos (existing, higher rate)
 
-**No format change.** Just emit at 30 Hz per alive player.
+**No format change.** Just emit at 30 Hz per alive player. This is the exact
+format the parser already reads (`src/parser/patterns.ts` → `PLAYER_POS`):
 
 ```
-LogSquadStats: PlayerPos: <displayName> (<eosID>) team=<1|2> pos=<x>,<y>,<z> yaw=<deg> health=<0..100>
+LogSquadStats: PlayerPos: eos=<eosID> ctrl=<controller> pos=<x>,<y>,<z> yaw=<deg> hp=<0..100> team=<1|2> squad=<n> role=<role> state=<alive|wound|dead>
 ```
+
+| field | type | notes |
+| --- | --- | --- |
+| `eos` | EOS ID | player |
+| `ctrl` | string | controller id (e.g. `BP_PlayerController_C_2147400001`) |
+| `pos` | `x,y,z` | world position (cm); `+Y` = north, `+Z` = up |
+| `yaw` | float (deg) | 0–360, 0 = north, CW |
+| `hp` | float | 0..100 |
+| `team` | `1\|2` | team |
+| `squad` | int | squad number (0 = unassigned) |
+| `role` | string | role/kit classname (e.g. `USA_Rifleman_01`) |
+| `state` | enum | `alive` \| `wound` \| `dead` |
 
 Example:
 ```
-[2026.06.23-18.42.11:003][  3]LogSquadStats: PlayerPos: Fluffy_Walrus (000100001234abcd) team=1 pos=123456,234567,1234 yaw=182.4 health=100
+[2026.06.23-18.42.11:003][  3]LogSquadStats: PlayerPos: eos=000100001234abcd ctrl=BP_PlayerController_C_2147400001 pos=123456.0,234567.0,1234.0 yaw=182.4 hp=100.0 team=1 squad=1 role=USA_Rifleman_01 state=alive
 ```
 
 **Rate:** 30 Hz per alive player. Dead / incapacitated players: 1 Hz or omit.

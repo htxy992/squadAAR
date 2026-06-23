@@ -240,3 +240,20 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .spark { height: 36px; }
 
 @media (max-width: 1100px) { .aar { grid-template-columns: 1fr; } }
+
+/* log uploader (rounds landing) */
+.uploader {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 16px; margin-bottom: 16px;
+  border: 1.5px dashed var(--line2); border-radius: 10px;
+  background: var(--panel2); color: var(--muted);
+  cursor: pointer; transition: border-color .15s, background .15s;
+}
+.uploader:hover { border-color: var(--accent); }
+.uploader.drag { border-color: var(--accent); background: #15202b; color: var(--text); }
+.uploader.busy { opacity: .7; cursor: progress; }
+.uploader .up-icon {
+  font-size: 18px; color: var(--accent);
+  width: 30px; height: 30px; display: grid; place-items: center;
+  border: 1px solid var(--line2); border-radius: 8px;
+}

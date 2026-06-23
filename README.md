@@ -134,23 +134,39 @@ The parser reads the **vanilla** dedicated-server lines (kills, wounds, revives,
 damage, possess, tickets, round result) that every Squad server already emits.
 For the **map replay** you additionally need position/cap/FOB/projectile
 telemetry, which vanilla logs do **not** contain — emit the extended
-`LogSquadStats:` lines from a server plugin/mod. Both formats are documented in
-[`docs/LOG_FORMAT.md`](docs/LOG_FORMAT.md).
+`LogSquadStats:` lines from a server plugin/mod. Formats are in
+[`docs/LOG_FORMAT.md`](docs/LOG_FORMAT.md) and [`docs/CQB_CAPTURE_SPEC.md`](docs/CQB_CAPTURE_SPEC.md).
+
+**Same box (game server + AAR on one machine — the default).** Point the server
+at the live log and it tails + ingests rounds as they finish, while serving the
+AAR from the same process:
 
 ```bash
-npm run ingest -- --reset /path/to/SquadGame.log
-npm run serve
+SQUAD_LOG=/path/to/SquadGame/Saved/Logs/SquadGame.log npm run serve
+# open http://localhost:8787 — finished rounds appear automatically
 ```
 
-You can ingest several logs chronologically (Elo carries across rounds):
+Or run the live tailer as its own process (writes to the same store the server reads):
 
 ```bash
-npm run ingest -- log1.log log2.log log3.log
+npm run watch -- /path/to/SquadGame.log    # add --from-start to replay existing rounds
 ```
 
-Without telemetry you still get full SquadPoints, SquadElo, leaderboards, the
-scoreboard and derived kill/plausibility analysis — just no continuous movement
-on the map.
+**One-shot files** (chronological; Elo carries across rounds):
+
+```bash
+npm run ingest -- --reset log1.log log2.log log3.log
+```
+
+**Remote / push** (AAR on a different box, or drag-drop in the UI):
+`POST /api/ingest` with the raw log text, the standalone
+[shipper](integrations/shipper/squad-aar-shipper.mjs), or the
+[SquadJS plugin](integrations/squadjs/squad-aar.js).
+
+See **[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)** for all transports and the
+telemetry tiers. Without extended telemetry you still get full SquadPoints,
+SquadElo, leaderboards, the scoreboard and derived kill/plausibility analysis —
+just no continuous movement on the map.
 
 ---
 

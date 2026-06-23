@@ -14,6 +14,7 @@
     "gen:heightmap": "tsx src/tools/genSampleHeightmap.ts",
     "fetch:maps": "tsx src/tools/fetchMaps.ts",
     "ingest": "tsx src/tools/ingestCli.ts",
+    "watch": "tsx src/tools/watchCli.ts",
     "serve": "tsx src/api/server.ts",
     "build:static": "tsx src/tools/buildStatic.ts",
     "demo": "tsx src/tools/demo.ts",
