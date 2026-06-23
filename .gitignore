@@ -21,3 +21,6 @@ tools/sdk/exports/
 .idea/
 .vscode/
 *.tsbuildinfo
+
+# Claude Code agent runtime (worktrees, session state)
+.claude/
