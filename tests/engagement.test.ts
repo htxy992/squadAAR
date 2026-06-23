@@ -4,6 +4,8 @@ import { buildBulletEvents, detectBursts, perpDistCm } from '../src/engagement/s
 import { buildEngagements } from '../src/engagement/detect.js';
 import { PositionBuffer } from '../src/engagement/positionBuffer.js';
 import { LookBuffer, enrichWithAim, bearingDegSquad, elevationDeg, angleBetween } from '../src/engagement/aim.js';
+import { playerCqbForRound, capSample } from '../src/engagement/playerCqb.js';
+import type { EngagementReport } from '../src/engagement/types.js';
 import type { TimelineEvent } from '../src/parser/events.js';
 import type { PositionSample } from '../src/engagement/types.js';
 import type { DeathReport, RoundPlayer } from '../src/timeline/types.js';
@@ -304,4 +306,59 @@ test('enrichWithAim: a miss without PlayerLook falls back to the projectile dire
   assert.equal(b.aimFromLook, false);
   assert.ok(Math.abs(b.aimErrorH ?? 0) > 2 && Math.abs(b.aimErrorH ?? 0) < 4, `aimErrorH ${b.aimErrorH}`);
   assert.ok((b.aimErrorDeg ?? 0) > 0, 'non-zero fallback aim error for a miss');
+});
+
+// ─── playerCqbForRound (per-player profile aggregation) ─────────────────────────
+
+const sampleEng = {
+  attackerEOSID: 'L', defenderEOSID: 'W', attackerTeam: 1, defenderTeam: 2,
+  outcome: 'defender_won', // winner = W (defender), loser = L (attacker)
+  flags: ['aim_off_target', 'peek_killed', 'pre_aim_advantage'],
+  attackerShots: [
+    { hit: false, recoilH: 0, recoilV: 0, aimErrorH: 2, aimErrorV: 1, aimErrorDeg: 2.2 },
+    { hit: false, recoilH: 1, recoilV: 2, aimErrorH: 2, aimErrorV: 3, aimErrorDeg: 3.6 },
+  ],
+  defenderShots: [
+    { hit: true, recoilH: 0, recoilV: 0, aimErrorH: 0.1, aimErrorV: 0.1, aimErrorDeg: 0.14 },
+  ],
+} as unknown as EngagementReport;
+
+test('playerCqbForRound: loser gets shots, loss, aim points and loser-only flags', () => {
+  const bursts = [{ spraySpread: 3, sprayControlScore: 0.4, maxRecoilV: 5 } as any];
+  const rc = playerCqbForRound([sampleEng], bursts, 'L');
+  assert.equal(rc.shots, 2);
+  assert.equal(rc.hits, 0);
+  assert.equal(rc.lost, 1);
+  assert.equal(rc.won, 0);
+  assert.equal(rc.aimPoints.length, 2);
+  assert.ok(Math.abs((rc.meanAimErrorDeg ?? 0) - 2.9) < 1e-6, `meanAimErrorDeg ${rc.meanAimErrorDeg}`);
+  // pre_aim_advantage is a winner tag → must NOT be attributed to the loser
+  assert.equal(rc.flags.aim_off_target, 1);
+  assert.equal(rc.flags.peek_killed, 1);
+  assert.equal((rc.flags as any).pre_aim_advantage, undefined);
+  assert.equal(rc.meanSpreadDeg, 3);
+  assert.ok(Math.abs((rc.sprayControl ?? 0) - 0.4) < 1e-9);
+});
+
+test('playerCqbForRound: winner gets the win, the hit, and no loser flags', () => {
+  const rc = playerCqbForRound([sampleEng], undefined, 'W');
+  assert.equal(rc.shots, 1);
+  assert.equal(rc.hits, 1);
+  assert.equal(rc.won, 1);
+  assert.equal(rc.lost, 0);
+  assert.equal(Object.keys(rc.flags).length, 0);
+  assert.equal(rc.meanSpreadDeg, null); // no bursts passed
+});
+
+test('playerCqbForRound: a player not in the engagement gets an empty summary', () => {
+  const rc = playerCqbForRound([sampleEng], undefined, 'someone-else');
+  assert.equal(rc.shots, 0);
+  assert.equal(rc.won + rc.lost + rc.traded, 0);
+  assert.equal(rc.aimPoints.length, 0);
+});
+
+test('capSample: downsamples to at most n, leaves short arrays alone', () => {
+  assert.equal(capSample([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 3).length, 3);
+  assert.deepEqual(capSample([1, 2], 5), [1, 2]);
+  assert.equal(capSample(Array.from({ length: 1000 }, (_, i) => i), 280).length, 280);
 });
