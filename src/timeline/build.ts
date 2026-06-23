@@ -817,8 +817,10 @@ function buildCQBEngagements(
   startTime: number,
   roundId: string
 ): { engagements: EngagementReport[]; bursts: Record<string, BurstSummary[]> } {
-  // Only run if we have explicit projectile telemetry
-  const hasProjectiles = analysis.projectiles.some(p => !p.derived);
+  // Only run if we have explicit direct-fire projectile telemetry (not mortars/explosives)
+  const hasProjectiles = analysis.projectiles.some(
+    p => !p.derived && p.weaponFamily !== 'explosive' && p.weaponFamily !== 'grenade'
+  );
   if (!hasProjectiles) return { engagements: [], bursts: {} };
 
   // Build the 30 Hz position buffer from pTracks
