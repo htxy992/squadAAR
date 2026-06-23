@@ -3,11 +3,27 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /**
- * SquadAAR — SquadJS plugin.
+ * SquadAAR — SquadJS emitter plugin.
  *
- * Ships each completed round from the Squad dedicated-server log to a SquadAAR
- * instance's /api/ingest endpoint. Drop this file in SquadJS's `squad-server/
- * plugins/` directory and add the block below to your SquadJS `config.json`:
+ * On a vanilla (even unlicensed) Squad server the dedicated-server log carries
+ * combat, identity and the round result, but NOT player team/squad/role — and no
+ * positions at all (the engine never writes coordinates to the log, and RCON has
+ * no position command). This plugin turns SquadJS into the telemetry *emitter*
+ * for everything that IS reachable without a server-side mod:
+ *
+ *   1. it tails the SquadGame.log and ships each completed round verbatim
+ *      (kills/wounds/revives/damage/possess/round-result — these parse exactly),
+ *   2. it snapshots the live roster over SquadJS's RCON connection and injects
+ *      `LogSquadStats: PlayerRole: … team=<n> squad=<n>` lines into that round,
+ *      so SquadAAR can put every player on the right team/squad and attribute
+ *      SquadPoints/SquadElo to the right class pool.
+ *
+ * Result on a vanilla server: a complete scoreboard, SquadPoints, SquadElo,
+ * leaderboards and the derived kill / plausibility analysis. There is still no
+ * map movement or CQB replay — those need real positions, which require a
+ * licensed server-side plugin emitting PlayerPos (see docs/LOG_FORMAT.md).
+ *
+ * Drop this file in SquadJS's `squad-server/plugins/` directory and add:
  *
  *   {
  *     "plugin": "SquadAAR",
@@ -15,17 +31,13 @@ import path from 'node:path';
  *     "aarUrl": "http://localhost:8787",
  *     "logFilePath": "/path/to/SquadGame/Saved/Logs/SquadGame.log",
  *     "token": "",
- *     "pollMs": 1000
+ *     "pollMs": 1000,
+ *     "rolePollMs": 60000
  *   }
- *
- * It tails the log itself (independent of SquadJS's own reader) and POSTs whole
- * rounds, so SquadAAR's parser does all the work and stays the single source of
- * truth for the log format. For full CQB telemetry the server must additionally
- * emit the extended `LogSquadStats:` lines (see docs/CQB_CAPTURE_SPEC.md).
  */
 export default class SquadAAR extends BasePlugin {
   static get description() {
-    return 'Ships completed rounds from the Squad server log to a SquadAAR instance.';
+    return 'Emits completed rounds (log + RCON roster) from a Squad server to a SquadAAR instance.';
   }
 
   static get defaultEnabled() {
@@ -54,6 +66,12 @@ export default class SquadAAR extends BasePlugin {
         description: 'How often (ms) to check the log for new lines.',
         default: 1000
       },
+      rolePollMs: {
+        required: false,
+        description:
+          'How often (ms) to snapshot the RCON roster into the active round as team/squad/role telemetry. 0 disables roster enrichment (ship the raw log only).',
+        default: 60000
+      },
       fromStart: {
         required: false,
         description: 'Ship rounds already present in the log on startup.',
@@ -73,7 +91,9 @@ export default class SquadAAR extends BasePlugin {
     this.curEnded = false;
     this.pumping = false;
     this.timer = null;
+    this.roleTimer = null;
     this.pump = this.pump.bind(this);
+    this.snapshotRoster = this.snapshotRoster.bind(this);
   }
 
   async mount() {
@@ -90,11 +110,15 @@ export default class SquadAAR extends BasePlugin {
     }
     this.verbose(1, `SquadAAR: shipping ${this.options.logFilePath} -> ${this.ingestUrl}`);
     this.timer = setInterval(this.pump, Number(this.options.pollMs) || 1000);
+    const rolePollMs = Number(this.options.rolePollMs);
+    if (rolePollMs > 0) this.roleTimer = setInterval(this.snapshotRoster, rolePollMs);
   }
 
   async unmount() {
     if (this.timer) clearInterval(this.timer);
+    if (this.roleTimer) clearInterval(this.roleTimer);
     this.timer = null;
+    this.roleTimer = null;
   }
 
   static isRoundStart(l) {
@@ -106,6 +130,42 @@ export default class SquadAAR extends BasePlugin {
       l.includes('has won the match with') ||
       l.includes('Match State Changed from InProgress to WaitingPostMatch')
     );
+  }
+
+  /** Squad-style UTC log timestamp: YYYY.MM.DD-HH.MM.SS:mmm */
+  static stamp(d = new Date()) {
+    const p = (n, w = 2) => String(n).padStart(w, '0');
+    return (
+      `${d.getUTCFullYear()}.${p(d.getUTCMonth() + 1)}.${p(d.getUTCDate())}-` +
+      `${p(d.getUTCHours())}.${p(d.getUTCMinutes())}.${p(d.getUTCSeconds())}:${p(d.getUTCMilliseconds(), 3)}`
+    );
+  }
+
+  /**
+   * Read the live roster off SquadJS (kept current via RCON) and inject one
+   * `LogSquadStats: PlayerRole` line per assigned player into the active round.
+   * No-op between rounds or when RCON has no roster yet — combat shipping is
+   * unaffected either way.
+   */
+  snapshotRoster() {
+    if (!this.curHasStart || this.curEnded) return;
+    const players = this.server && Array.isArray(this.server.players) ? this.server.players : [];
+    if (!players.length) return;
+    const ts = `[${SquadAAR.stamp()}][ 0]`;
+    let added = 0;
+    for (const pl of players) {
+      const eos = pl && (pl.eosID || pl.EOSID || (pl.onlineIDs && pl.onlineIDs.eos));
+      const role = pl && pl.role;
+      if (!eos || !role) continue; // unassigned / loading players carry no role
+      const team = Number(pl.teamID);
+      const squad = Number(pl.squadID);
+      const lead = pl.isLeader ? 1 : 0;
+      const teamPart = Number.isFinite(team) ? ` team=${team}` : '';
+      const squadPart = Number.isFinite(squad) ? ` squad=${squad}` : ' squad=0';
+      this.cur.push(`${ts}LogSquadStats: PlayerRole: eos=${eos} role=${role} lead=${lead}${teamPart}${squadPart}`);
+      added++;
+    }
+    if (added) this.verbose(2, `SquadAAR: roster snapshot — ${added} player role line(s)`);
   }
 
   async ship(lines) {
@@ -143,6 +203,8 @@ export default class SquadAAR extends BasePlugin {
         this.cur = [line];
         this.curHasStart = true;
         this.curEnded = false;
+        // capture the roster at kickoff so even short rounds get team/squad data
+        this.snapshotRoster();
         continue;
       }
       this.cur.push(line);

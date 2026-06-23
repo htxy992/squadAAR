@@ -159,14 +159,19 @@ npm run ingest -- --reset log1.log log2.log log3.log
 ```
 
 **Remote / push** (AAR on a different box, or drag-drop in the UI):
-`POST /api/ingest` with the raw log text, the standalone
-[shipper](integrations/shipper/squad-aar-shipper.mjs), or the
-[SquadJS plugin](integrations/squadjs/squad-aar.js).
+`POST /api/ingest` with the raw log text, or the standalone
+[shipper](integrations/shipper/squad-aar-shipper.mjs).
+
+**Vanilla / unlicensed server** (the common case): the bare log has no
+team/squad/role and no positions. Run the [SquadJS emitter
+plugin](integrations/squadjs/squad-aar.js) — it ships each round **and** reads the
+roster over RCON, injecting the missing team/squad/role telemetry so you get a
+correct scoreboard, SquadElo and per-class leaderboards. (Use the emitter *or* the
+`SQUAD_LOG` tail, not both.) Map movement / CQB still need a licensed server-side
+plugin that emits positions.
 
 See **[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)** for all transports and the
-telemetry tiers. Without extended telemetry you still get full SquadPoints,
-SquadElo, leaderboards, the scoreboard and derived kill/plausibility analysis —
-just no continuous movement on the map.
+telemetry tiers.
 
 ---
 

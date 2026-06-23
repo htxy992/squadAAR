@@ -92,10 +92,13 @@ SQUAD_LOG=/path/to/SquadGame.log AAR_URL=https://aar-host:8787 \
   node squad-aar-shipper.mjs
 ```
 
-**D. SquadJS plugin** — already running [SquadJS](https://github.com/Team-Silver-Sphere/SquadJS)?
+**D. SquadJS emitter plugin** — already running [SquadJS](https://github.com/Team-Silver-Sphere/SquadJS)?
 Drop [`integrations/squadjs/squad-aar.js`](../integrations/squadjs/squad-aar.js)
-into its `plugins/` dir and add the config block in that file's header. Same
-behaviour as the shipper, managed by SquadJS's plugin lifecycle.
+into its `plugins/` dir and add the config block in that file's header. Besides
+shipping completed rounds, it reads the live **roster over RCON** and injects
+`LogSquadStats: PlayerRole … team=<n> squad=<n>` telemetry into each round — so a
+**vanilla server** (which never logs team/squad/role) still gets a correct
+scoreboard and per-class Elo pools. See the vanilla note below.
 
 ---
 
@@ -103,9 +106,17 @@ behaviour as the shipper, managed by SquadJS's plugin lifecycle.
 
 | tier | source | what works |
 | --- | --- | --- |
-| **Vanilla** | stock dedicated-server log (every server) | kills/wounds/revives, tickets, round result → **SquadPoints, SquadElo, leaderboards, scoreboard, derived kill/plausibility analysis**. No continuous movement. |
-| **Positional** | + extended `LogSquadStats:` (positions, cap zones, FOBs, projectiles) from a server plugin/mod | the full **map replay** — player/vehicle movement, flags/FOBs, animated bullets, sightlines, "why you died". |
+| **Vanilla (bare log)** | stock dedicated-server log (every server) | kills/wounds/revives, round result → **SquadPoints, kill/plausibility analysis, kill feed**. The bare log has no team/squad/role, so the scoreboard collapses to one team and Elo to the *Generic* pool. |
+| **Vanilla + SquadJS emitter** | bare log **+ RCON roster** (`PlayerRole … team=/squad=`) | adds correct **teams, squads, class pools** → a real **scoreboard, SquadElo, per-pool leaderboards, team-balance**. Still no movement (RCON has no positions). This is the best a vanilla/unlicensed server can do. |
+| **Positional** | + extended `LogSquadStats:` (positions, cap zones, FOBs, projectiles) from a licensed server plugin/mod | the full **map replay** — player/vehicle movement, flags/FOBs, animated bullets, sightlines, "why you died". |
 | **CQB detail** | + 30 Hz PlayerPos, HitDetail, PlayerLook, PlayerState | per-shot **spray/recoil**, 1v1 **engagement coaching**, hit-zones. See [`CQB_CAPTURE_SPEC.md`](CQB_CAPTURE_SPEC.md). |
+
+> **Vanilla / unlicensed server?** Squad never writes player positions to the log
+> and RCON has no position command, so map movement and CQB are impossible without
+> a licensed server-side plugin. But the **SquadJS emitter (3D)** gets you the full
+> *Vanilla + emitter* tier above. Run **either** the SquadJS emitter **or** the
+> bare `SQUAD_LOG` tail — not both, or each round ingests twice. The emitter is the
+> right choice on a vanilla server because the bare tail can't supply team/squad/role.
 
 The pipeline **degrades gracefully**: the standard map AAR is lightweight and runs
 on vanilla + positional telemetry; the CQB engagement detail only activates when

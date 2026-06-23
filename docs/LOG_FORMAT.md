@@ -53,7 +53,7 @@ LogSquadStats: FobCreated: fob=<id> team=<n> pos=<x>,<y>,<z> creator=<eos>
 LogSquadStats: FobDestroyed: fob=<id> team=<n> pos=<x>,<y>,<z>
 LogSquadStats: SpawnCreated: kind=<RallyPoint|HAB> team=<n> squad=<n> pos=<x>,<y>,<z>
 LogSquadStats: PlayerSpawn: eos=<eos> spawn=<Name> pos=<x>,<y>,<z>
-LogSquadStats: PlayerRole: eos=<eos> role=<RoleClass> lead=<0|1>
+LogSquadStats: PlayerRole: eos=<eos> role=<RoleClass> lead=<0|1> [team=<1|2> squad=<n>]
 LogSquadStats: SquadCreated: team=<n> squad=<n> name=<Name> creator=<eos>
 LogSquadStats: AmmoDelivery: fob=<id> eos=<eos> amount=<n>
 LogSquadStats: MapMarker: eos=<eos> type=<Type> pos=<x>,<y>,<z>
@@ -65,6 +65,18 @@ the explosive/mortar/artillery family (e.g. `BP_Mortar_Projectile`) is rendered
 as a lobbed arc with a blast-radius burst and is exempt from line-of-sight
 occlusion checks (it arcs over terrain). Use `from` = the mortar/launcher
 position and `to` = the impact point.
+
+#### `PlayerRole` without positions (vanilla servers)
+
+The optional `team=` / `squad=` suffix on `PlayerRole` is how a **non-positional**
+emitter assigns the roster. A vanilla server's log never records team/squad/role,
+and RCON has no position command — but it *can* list the roster. The bundled
+[SquadJS emitter](../integrations/squadjs/squad-aar.js) reads that roster over
+RCON and writes one `PlayerRole … team=<n> squad=<n>` line per assigned player
+into each round, so SquadAAR builds a correct scoreboard and attributes
+SquadPoints/SquadElo to the right class pool **without any PlayerPos telemetry**.
+The `team`/`squad` fields are optional, so a positional emitter that already sends
+`PlayerPos` can keep emitting the short `PlayerRole … lead=<0|1>` form unchanged.
 
 ### Real maps (like SquadCalc)
 

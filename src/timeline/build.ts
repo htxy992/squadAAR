@@ -148,6 +148,10 @@ export function buildRound(events: TimelineEvent[], opts: BuildOptions = {}): Ro
       }
       case 'PLAYER_ROLE':
         pushRole(e.eosID, e.role, e.time);
+        // A non-positional emitter (SquadJS over RCON) carries team/squad here so
+        // the scoreboard and Elo pools work on vanilla logs that lack PlayerPos.
+        if (e.team != null) teamOf.set(e.eosID, e.team);
+        if (e.squad != null) squadOf.set(e.eosID, e.squad);
         break;
       case 'VEHICLE_POS': {
         const v = vTracks.get(e.vehicle) ?? { type: e.vehType, team: e.team, samples: [] as VSample[], comp: new Map<string, { t: number; health: number }[]>() };

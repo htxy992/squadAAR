@@ -269,6 +269,9 @@ export interface PlayerRoleEvent extends BaseEvent {
   eosID: string;
   role: string;
   isLead: boolean;
+  /** team/squad as reported by a non-positional emitter (e.g. SquadJS via RCON). */
+  team?: number;
+  squad?: number;
 }
 
 export interface SquadCreatedEvent extends BaseEvent {

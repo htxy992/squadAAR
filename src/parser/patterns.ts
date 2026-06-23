@@ -357,8 +357,23 @@ const extended: Pattern[] = [
   },
   {
     name: 'PLAYER_ROLE',
-    regex: new RegExp(`^\\[([0-9.:-]+)]\\[([ 0-9]*)]LogSquadStats: PlayerRole: eos=${EOS} role=${W} lead=([01])`),
-    handle: (m, ctx) => ctx.emit({ type: 'PLAYER_ROLE', ...ctx.base(m), eosID: m[3], role: m[4], isLead: m[5] === '1' })
+    // The optional trailing `team=<n> squad=<n>` lets a non-positional emitter
+    // (e.g. the SquadJS plugin, which reads the roster over RCON) assign every
+    // player's team/squad/role on a vanilla server that emits no PlayerPos. The
+    // groups are optional, so legacy PlayerRole lines still parse unchanged.
+    regex: new RegExp(
+      `^\\[([0-9.:-]+)]\\[([ 0-9]*)]LogSquadStats: PlayerRole: eos=${EOS} role=${W} lead=([01])(?: team=(\\d) squad=(\\d+))?`
+    ),
+    handle: (m, ctx) =>
+      ctx.emit({
+        type: 'PLAYER_ROLE',
+        ...ctx.base(m),
+        eosID: m[3],
+        role: m[4],
+        isLead: m[5] === '1',
+        team: m[6] != null ? +m[6] : undefined,
+        squad: m[7] != null ? +m[7] : undefined
+      })
   },
   {
     name: 'SQUAD_CREATED',
